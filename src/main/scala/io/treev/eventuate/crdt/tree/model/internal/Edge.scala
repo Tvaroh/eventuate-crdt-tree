@@ -1,4 +1,4 @@
-package io.treev.eventuate.crdt.tree
+package io.treev.eventuate.crdt.tree.model.internal
 
 private[tree]
 case class Edge[A, Id](nodeId: Id,
