@@ -4,6 +4,7 @@ name := "eventuate-crdt-tree"
 organization := "io.treev.eventuate"
 
 scalaVersion := "2.12.1"
+crossScalaVersions := Seq(scalaVersion.value, "2.11.8")
 scalacOptions := Seq(
   "-deprecation",
   "-encoding", "UTF-8",
@@ -25,6 +26,20 @@ scalacOptions in (Compile, console) ~= { defaultOptions =>
   defaultOptions filterNot unwantedOptions
 }
 
-resolvers in ThisBuild += "Eventuate Releases" at "https://dl.bintray.com/rbmhtechnology/maven"
+resolvers in ThisBuild ++= Seq(
+  "Eventuate Releases" at "https://dl.bintray.com/rbmhtechnology/maven"
+)
 
-libraryDependencies += "com.rbmhtechnology" %% "eventuate-crdt" % "0.8.1"
+val EventuateVersion = "0.9-SNAPSHOT"
+
+lazy val root =
+  project.in(file("."))
+    .configs(IntegrationTest)
+    .settings(Defaults.itSettings: _*)
+    .settings {
+      libraryDependencies ++= Seq(
+        "com.rbmhtechnology" %% "eventuate-crdt" % EventuateVersion,
+        "com.rbmhtechnology" %% "eventuate-log-leveldb" % EventuateVersion % Test classifier "it",
+        "org.scalatest" %% "scalatest" % "3.0.1" % Test
+      )
+    }
