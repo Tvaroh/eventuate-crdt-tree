@@ -10,8 +10,8 @@ import scala.concurrent.Future
 class TreeCrdtService[A, Id](override val serviceId: String,
                              override val log: ActorRef)
                             (implicit override val system: ActorSystem,
-                                      override val ops: CRDTServiceOps[TreeCrdt[A, Id], Tree[A, Id]])
-  extends CRDTService[TreeCrdt[A, Id], Tree[A, Id]] {
+                                      override val ops: CRDTServiceOps[TreeCRDT[A, Id], Tree[A, Id]])
+  extends CRDTService[TreeCRDT[A, Id], Tree[A, Id]] {
 
   start()
 
