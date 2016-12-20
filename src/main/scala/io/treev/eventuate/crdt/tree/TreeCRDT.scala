@@ -7,6 +7,8 @@ import io.treev.eventuate.crdt.tree.model.exception._
 import io.treev.eventuate.crdt.tree.model.internal._
 import io.treev.eventuate.crdt.tree.model.op._
 
+import scala.util.{Failure, Success, Try}
+
 /** Unordered tree CRDT. */
 case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
                            edgesByNodeId: Map[Id, Edge[A, Id]] = Map.empty[Id, Edge[A, Id]],
@@ -34,11 +36,11 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   }
 
   private[tree]
-  def prepareCreateChildNode(parentId: Id, nodeId: Id, payload: A): Option[CreateChildNodeOpPrepared[Id, A]] =
+  def prepareCreateChildNode(parentId: Id, nodeId: Id, payload: A): Try[Option[CreateChildNodeOpPrepared[Id, A]]] =
     if (nodeExists(parentId))
-      if (!nodeExists(nodeId)) Some(CreateChildNodeOpPrepared(parentId, nodeId, payload))
-      else throw NodeAlreadyExistsException(nodeId)
-    else throw ParentNodeNotExistsException(parentId)
+      if (!nodeExists(nodeId)) Success(Some(CreateChildNodeOpPrepared(parentId, nodeId, payload)))
+      else Failure(NodeAlreadyExistsException(nodeId))
+    else Failure(ParentNodeNotExistsException(parentId))
 
   private[tree]
   def createChildNode(prepared: CreateChildNodeOpPrepared[Id, A], serviceInfo: ServiceInfo): TreeCRDT[A, Id] = {
@@ -55,7 +57,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   }
 
   private[tree]
-  def prepareDeleteSubTree(nodeId: Id): Option[DeleteSubTreeOpPrepared[Id]] = ???
+  def prepareDeleteSubTree(nodeId: Id): Try[Option[DeleteSubTreeOpPrepared[Id]]] = ???
 
   private[tree]
   def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): TreeCRDT[A, Id] = ???
@@ -139,7 +141,7 @@ object TreeCRDT {
 
     override def value(crdt: TreeCRDT[A, Id]): Tree[A, Id] = crdt.value
 
-    override def prepare(crdt: TreeCRDT[A, Id], operation: Any): Option[Any] =
+    override def prepare(crdt: TreeCRDT[A, Id], operation: Any): Try[Option[Any]] =
       operation match {
         case CreateChildNodeOp(parentId, nodeId, payload) =>
           crdt.prepareCreateChildNode(coerseId(parentId), coerseId(nodeId), coersePayload(payload))

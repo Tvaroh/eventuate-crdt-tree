@@ -1,7 +1,7 @@
 package io.treev.eventuate.crdt.tree
 
 import io.treev.eventuate.crdt.tree.model.Tree
-import io.treev.eventuate.crdt.tree.model.exception.NodeAlreadyExistsException
+import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
 import org.scalatest.{Assertion, AsyncWordSpec}
 
 import scala.concurrent.Future
@@ -91,6 +91,14 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb {
             )
           )
         }
+      }
+    }
+
+    "fail with NodeAlreadyExistsException if parent node doesn't exist" in withService { service =>
+      val (node1Id, payload1) = node(1)
+
+      recoverToSucceededIf[ParentNodeNotExistsException] {
+        service.createChildNode(crdtId, "oops", node1Id, payload1)
       }
     }
 
