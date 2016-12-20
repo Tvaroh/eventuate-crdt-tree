@@ -3,7 +3,7 @@ package io.treev.eventuate.crdt.tree.model
 /** Tree CRDT configuration. */
 case class TreeConfig[A, Id](rootNodeId: Id,
                              rootPayload: A,
-                             policies: Policies[A, Id] = Policies.default)
+                             policies: Policies[A, Id] = Policies.default[A, Id])
 
 /** Conflicts resolution policies.
   * @param connectionPolicy concurrent addition/removal conflict resolution policy

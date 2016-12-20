@@ -39,7 +39,8 @@ lazy val root =
     .settings {
       libraryDependencies ++= Seq(
         "com.rbmhtechnology" %% "eventuate-crdt" % EventuateVersion,
-        "com.rbmhtechnology" %% "eventuate-log-leveldb" % EventuateVersion % Test classifier "it",
+        "com.rbmhtechnology" %% "eventuate-log-leveldb" % EventuateVersion % Test,
+        "com.rbmhtechnology" %% "eventuate-log-leveldb" % EventuateVersion % "test->test;it->it" classifier "it",
         "org.scalatest" %% "scalatest" % "3.0.1" % Test
       )
     }

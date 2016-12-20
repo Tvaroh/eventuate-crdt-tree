@@ -15,23 +15,22 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   extends CRDTFormat {
 
   /** Get whole tree value from underlying CRDT. */
-  def value: Tree[A, Id] =
-    value(treeConfig.rootNodeId)
-      .getOrElse(Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set.empty))
+  def value: Tree[A, Id] = {
+    val topEdges = edgesByParentId.getOrElse(treeConfig.rootNodeId, Set.empty)
+    Tree(treeConfig.rootNodeId, treeConfig.rootPayload, topEdges.flatMap(edge => value(edge.nodeId)))
+  }
 
   /** Get tree value starting from supplied node id from underlying CRDT. */
   def value(nodeId: Id): Option[Tree[A, Id]] = {
     def toTree(edge: Edge[A, Id], parentId: Id): Tree[A, Id] = {
       val childEdges = edgesByParentId.getOrElse(edge.nodeId, Set.empty)
-      Tree(parentId, edge.payload, childEdges.map(toTree(_, edge.nodeId)))
+      Tree(edge.nodeId, edge.payload, childEdges.map(toTree(_, edge.nodeId)))
     }
 
     for {
       edge <- edgesByNodeId.get(nodeId)
-      tree <- edgesByParentId
-        .get(nodeId)
-        .map(topEdges => Tree(nodeId, edge.payload, topEdges.map(toTree(_, nodeId))))
-    } yield tree
+      children = edgesByParentId.getOrElse(nodeId, Set.empty)
+    } yield Tree(nodeId, edge.payload, children.map(toTree(_, nodeId)))
   }
 
   private[tree]
@@ -51,7 +50,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
       } { existingEdge => // concurrent addition conflict
         resolveConcurrentAddition(existingEdge, edge)
       }
-    else
+    else // concurrent addition/deletion conflict
       ???
   }
 

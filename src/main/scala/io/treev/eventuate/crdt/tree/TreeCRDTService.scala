@@ -7,7 +7,7 @@ import io.treev.eventuate.crdt.tree.model.op.{CreateChildNodeOp, DeleteSubTreeOp
 
 import scala.concurrent.Future
 
-class TreeCrdtService[A, Id](override val serviceId: String,
+class TreeCRDTService[A, Id](override val serviceId: String,
                              override val log: ActorRef)
                             (implicit override val system: ActorSystem,
                                       override val ops: CRDTServiceOps[TreeCRDT[A, Id], Tree[A, Id]])
