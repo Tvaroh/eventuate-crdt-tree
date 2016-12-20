@@ -1,8 +1,9 @@
 package io.treev.eventuate.crdt.tree
 
+import com.rbmhtechnology.eventuate.{MultiLocationSpecLeveldb, ReplicationEndpoint}
 import org.scalatest.WordSpec
 
-class TreeCRDTChaosSpecLeveldb extends WordSpec with TreeCRDTSpecBaseLeveldb {
+class TreeCRDTChaosSpecLeveldb extends WordSpec with TreeCRDTSpecBaseLeveldb with MultiLocationSpecLeveldb {
   import com.rbmhtechnology.eventuate.ReplicationIntegrationSpec.replicationConnection
 
   "A replicated TreeCRDT" must {
@@ -24,6 +25,11 @@ class TreeCRDTChaosSpecLeveldb extends WordSpec with TreeCRDTSpecBaseLeveldb {
 
       // TODO
     }
+  }
+
+  private def service(endpoint: ReplicationEndpoint): TreeCRDTService[String, String] = {
+    implicit val system = endpoint.system
+    new TreeCRDTService[String, String](endpoint.id, endpoint.logs("L1"))
   }
 
 }

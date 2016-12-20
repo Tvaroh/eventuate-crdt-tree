@@ -1,12 +1,14 @@
 package io.treev.eventuate.crdt.tree
 
+import akka.actor.ActorSystem
+import com.rbmhtechnology.eventuate.SingleLocationSpecLeveldb
 import io.treev.eventuate.crdt.tree.model.Tree
 import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
 import org.scalatest.{Assertion, AsyncWordSpec}
 
 import scala.concurrent.Future
 
-class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb {
+class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb with SingleLocationSpecLeveldb {
 
   "TreeCRDT" must {
 
@@ -116,10 +118,11 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb {
 
   }
 
+  override implicit val system: ActorSystem = ActorSystem("test")
+
   private def withService(f: TreeCRDTService[String, String] => Future[Assertion]): Future[Assertion] = {
-    val loc = location("A", customConfig = customConfig)
-    val endpoint = loc.endpoint(Set("L1"), Set.empty)
-    f(service(endpoint))
+    val service = new TreeCRDTService[String, String]("a", log)
+    f(service)
   }
 
   private def node(number: Int): (String, String) =

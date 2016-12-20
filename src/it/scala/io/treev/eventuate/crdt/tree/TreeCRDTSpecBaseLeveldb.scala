@@ -1,15 +1,10 @@
 package io.treev.eventuate.crdt.tree
 
-import com.rbmhtechnology.eventuate.{MultiLocationSpecLeveldb, ReplicationEndpoint}
 import com.typesafe.config.{Config, ConfigFactory}
 import io.treev.eventuate.crdt.tree.model.{Tree, TreeConfig}
 import org.scalatest.Matchers
-import org.scalatest.concurrent.ScalaFutures
 
-trait TreeCRDTSpecBaseLeveldb
-  extends Matchers
-    with ScalaFutures
-    with MultiLocationSpecLeveldb {
+trait TreeCRDTSpecBaseLeveldb extends Matchers {
 
   protected val crdtId = "1"
 
@@ -20,11 +15,6 @@ trait TreeCRDTSpecBaseLeveldb
 
   protected implicit val treeConfig: TreeConfig[String, String] =
     TreeConfig[String, String]("root", "rootPayload")
-
-  protected def service(endpoint: ReplicationEndpoint): TreeCRDTService[String, String] = {
-    implicit val system = endpoint.system
-    new TreeCRDTService[String, String](endpoint.id, endpoint.logs("L1"))
-  }
 
   protected def noChildren: Set[Tree[String, String]] = Set.empty
 
