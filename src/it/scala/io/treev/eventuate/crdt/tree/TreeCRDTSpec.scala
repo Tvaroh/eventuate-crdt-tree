@@ -2,10 +2,14 @@ package io.treev.eventuate.crdt.tree
 
 import com.rbmhtechnology.eventuate.VectorTime
 import com.rbmhtechnology.eventuate.crdt.ORSet
+import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
 import io.treev.eventuate.crdt.tree.model.internal.{Edge, ServiceInfo}
+import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
 import io.treev.eventuate.crdt.tree.model.{Tree, TreeConfig}
 import org.scalatest.OptionValues._
 import org.scalatest.{Matchers, WordSpec}
+
+import scala.util.{Failure, Success}
 
 class TreeCRDTSpec extends WordSpec with Matchers {
 
@@ -93,6 +97,33 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node2Id, payload2),
           edge(node2Id, node3Id, payload3)
         ).value("wrong") should be (None)
+      }
+
+    }
+
+    "prepareCreateChildNode" must {
+
+      "return valid CreateChildNodeOpPrepared instance on success" in {
+        val (nodeId, payload) = node(1)
+        treeCRDT.prepareCreateChildNode(treeConfig.rootNodeId, nodeId, payload) should be {
+          Success(Some(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload)))
+        }
+      }
+
+      "fail with ParentNodeNotExistsException if parent node doesn't exist" in {
+        val parentId = "wrong"
+        val (nodeId, payload) = node(1)
+        treeCRDT.prepareCreateChildNode(parentId, nodeId, payload) should be {
+          Failure(ParentNodeNotExistsException(parentId))
+        }
+      }
+
+      "fail with NodeAlreadyExistsException if node with same id already exists" in {
+        val (nodeId, payload) = node(1)
+        treeCRDT(edge(treeConfig.rootNodeId, nodeId, payload))
+          .prepareCreateChildNode(treeConfig.rootNodeId, nodeId, payload) should be {
+          Failure(NodeAlreadyExistsException(nodeId))
+        }
       }
 
     }

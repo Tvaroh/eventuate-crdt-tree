@@ -96,7 +96,7 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
       }
     }
 
-    "fail with NodeAlreadyExistsException if parent node doesn't exist" in withService { service =>
+    "fail with ParentNodeNotExistsException if parent node doesn't exist" in withService { service =>
       val (node1Id, payload1) = node(1)
 
       recoverToSucceededIf[ParentNodeNotExistsException] {
