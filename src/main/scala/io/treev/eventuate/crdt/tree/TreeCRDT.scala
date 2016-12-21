@@ -83,7 +83,10 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
         edges.remove(edges.prepareRemove(existingEdge)).add(edge, edge.serviceInfo.vectorTimestamp),
       edgesByNodeId = edgesByNodeId.updated(existingEdge.nodeId, edge),
       edgesByParentId = edgesByParentId
-        .updated(existingEdge.parentId, edgesByParentId.getOrElse(existingEdge.parentId, Set.empty) + edge)
+        .updated(
+          existingEdge.parentId,
+          edgesByParentId.getOrElse(existingEdge.parentId, Set.empty) - existingEdge + edge
+        )
     )
 
   private def removeEdge(edge: Edge[A, Id]): TreeCRDT[A, Id] =
