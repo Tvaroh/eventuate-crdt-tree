@@ -12,14 +12,14 @@ import scala.util.{Failure, Success, Try}
 /** Unordered tree CRDT. */
 case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
                            edgesByNodeId: Map[Id, Edge[A, Id]] = Map.empty[Id, Edge[A, Id]],
-                           edgesByParentId: Map[Id, Set[Edge[A, Id]]] = Map.empty[Id, Set[Edge[A, Id]]])
+                           edgesByParentId: Map[Id, Map[Id, Edge[A, Id]]] = Map.empty[Id, Map[Id, Edge[A, Id]]])
                           (implicit treeConfig: TreeConfig[A, Id])
   extends CRDTFormat {
 
   /** Get whole tree value from underlying CRDT. */
   def value: Tree[A, Id] = {
-    val topEdges = edgesByParentId.getOrElse(treeConfig.rootNodeId, Set.empty)
-    Tree(treeConfig.rootNodeId, treeConfig.rootPayload, topEdges.flatMap(edge => value(edge.nodeId)))
+    val topEdges = edgesByParentId.getOrElse(treeConfig.rootNodeId, Map.empty)
+    Tree(treeConfig.rootNodeId, treeConfig.rootPayload, topEdges.keySet.flatMap(nodeId => value(nodeId)))
   }
 
   /** Get tree value starting from supplied node id from underlying CRDT. */
@@ -27,14 +27,14 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
     if (isRoot(nodeId)) Some(value)
     else {
       def toTree(edge: Edge[A, Id], parentId: Id): Tree[A, Id] = {
-        val childEdges = edgesByParentId.getOrElse(edge.nodeId, Set.empty)
-        Tree(edge.nodeId, edge.payload, childEdges.map(toTree(_, edge.nodeId)))
+        val childEdges = edgesByParentId.getOrElse(edge.nodeId, Map.empty)
+        Tree(edge.nodeId, edge.payload, childEdges.values.map(toTree(_, edge.nodeId)).toSet)
       }
 
       for {
         edge <- edgesByNodeId.get(nodeId)
-        children = edgesByParentId.getOrElse(nodeId, Set.empty)
-      } yield Tree(nodeId, edge.payload, children.map(toTree(_, nodeId)))
+        children = edgesByParentId.getOrElse(nodeId, Map.empty)
+      } yield Tree(nodeId, edge.payload, children.values.map(toTree(_, nodeId)).toSet)
     }
 
   private[tree]
@@ -74,7 +74,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
       edges = edges.add(edge, edge.serviceInfo.vectorTimestamp),
       edgesByNodeId = edgesByNodeId.updated(edge.nodeId, edge),
       edgesByParentId = edgesByParentId
-        .updated(edge.parentId, edgesByParentId.getOrElse(edge.parentId, Set.empty) + edge)
+        .updated(edge.parentId, edgesByParentId.getOrElse(edge.parentId, Map.empty).updated(edge.nodeId, edge))
     )
 
   private def replaceEdge(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =
@@ -85,7 +85,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
       edgesByParentId = edgesByParentId
         .updated(
           existingEdge.parentId,
-          edgesByParentId.getOrElse(existingEdge.parentId, Set.empty) - existingEdge + edge
+          edgesByParentId.getOrElse(existingEdge.parentId, Map.empty).updated(edge.nodeId, edge)
         )
     )
 
@@ -95,7 +95,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
         edges.remove(edges.prepareRemove(edge)),
       edgesByNodeId = edgesByNodeId - edge.nodeId,
       edgesByParentId = edgesByParentId
-        .updated(edge.parentId, edgesByParentId.get(edge.parentId).map(_ - edge).getOrElse(Set.empty))
+        .updated(edge.parentId, edgesByParentId.get(edge.parentId).map(_ - edge.nodeId).getOrElse(Map.empty))
     )
 
   private def resolveConcurrentAddition(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =

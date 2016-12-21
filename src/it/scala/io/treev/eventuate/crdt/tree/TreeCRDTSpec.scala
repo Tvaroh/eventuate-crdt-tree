@@ -299,7 +299,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
     val edgesByNodeId =
       edges.map(edge => (edge.nodeId, edge)).toMap
     val edgesByParentId =
-      edges.groupBy(_.parentId).mapValues(_.toSet)
+      edges.groupBy(_.parentId).mapValues(_.map(edge => (edge.nodeId, edge)).toMap)
 
     TreeCRDT[Payload, Id](edgesORSet, edgesByNodeId, edgesByParentId)
   }
