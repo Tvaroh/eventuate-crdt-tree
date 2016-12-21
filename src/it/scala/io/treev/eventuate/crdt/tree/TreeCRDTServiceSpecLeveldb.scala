@@ -2,26 +2,26 @@ package io.treev.eventuate.crdt.tree
 
 import akka.actor.ActorSystem
 import com.rbmhtechnology.eventuate.SingleLocationSpecLeveldb
-import io.treev.eventuate.crdt.tree.model.Tree
+import io.treev.eventuate.crdt.tree.model.{Tree, TreeConfig}
 import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
-import org.scalatest.{Assertion, AsyncWordSpec}
+import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.concurrent.Future
 
-class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb with SingleLocationSpecLeveldb {
+class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with SingleLocationSpecLeveldb {
 
-  "TreeCRDT" must {
+  "TreeCRDTService" must {
 
     "return single root element tree on empty tree" in withService { service =>
       service.value(crdtId).map {
-        _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, noChildren))
+        _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload))
       }
     }
 
     "add child node to an empty tree" in withService { service =>
       val (nodeId, payload) = node(1)
       service.createChildNode(crdtId, treeConfig.rootNodeId, nodeId, payload).map {
-        _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(nodeId, payload, noChildren))))
+        _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(nodeId, payload))))
       }
     }
 
@@ -40,7 +40,7 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb wit
               Tree(
                 node1Id, payload1,
                 Set(
-                  Tree(node2Id, payload2, noChildren)
+                  Tree(node2Id, payload2)
                 )
               )
             )
@@ -61,8 +61,8 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb wit
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
             Set(
-              Tree(node1Id, payload1, noChildren),
-              Tree(node2Id, payload2, noChildren)
+              Tree(node1Id, payload1),
+              Tree(node2Id, payload2)
             )
           )
         }
@@ -86,8 +86,8 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb wit
               Tree(
                 node1Id, payload1,
                 Set(
-                  Tree(node2Id, payload2, noChildren),
-                  Tree(node3Id, payload3, noChildren)
+                  Tree(node2Id, payload2),
+                  Tree(node3Id, payload3)
                 )
               )
             )
@@ -119,6 +119,11 @@ class TreeCRDTSpecLeveldb extends AsyncWordSpec with TreeCRDTSpecBaseLeveldb wit
   }
 
   override implicit val system: ActorSystem = ActorSystem("test")
+
+  private val crdtId = "1"
+
+  private implicit val treeConfig: TreeConfig[String, String] =
+    TreeConfig[String, String]("root", "rootPayload")
 
   private def withService(f: TreeCRDTService[String, String] => Future[Assertion]): Future[Assertion] = {
     val service = new TreeCRDTService[String, String]("a", log)
