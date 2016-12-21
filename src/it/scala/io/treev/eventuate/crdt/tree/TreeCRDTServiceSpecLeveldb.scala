@@ -100,7 +100,7 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
       val (node1Id, payload1) = node(1)
 
       recoverToSucceededIf[ParentNodeNotExistsException] {
-        service.createChildNode(crdtId, "oops", node1Id, payload1)
+        service.createChildNode(crdtId, "wrong", node1Id, payload1)
       }
     }
 
@@ -123,7 +123,7 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
   private val crdtId = "1"
 
   private implicit val treeConfig: TreeConfig[String, String] =
-    TreeConfig[String, String]("root", "rootPayload")
+    TreeConfig[String, String]("root", "root's payload")
 
   private def withService(f: TreeCRDTService[String, String] => Future[Assertion]): Future[Assertion] = {
     val service = new TreeCRDTService[String, String]("a", log)

@@ -23,17 +23,19 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   }
 
   /** Get tree value starting from supplied node id from underlying CRDT. */
-  def value(nodeId: Id): Option[Tree[A, Id]] = {
-    def toTree(edge: Edge[A, Id], parentId: Id): Tree[A, Id] = {
-      val childEdges = edgesByParentId.getOrElse(edge.nodeId, Set.empty)
-      Tree(edge.nodeId, edge.payload, childEdges.map(toTree(_, edge.nodeId)))
-    }
+  def value(nodeId: Id): Option[Tree[A, Id]] =
+    if (isRoot(nodeId)) Some(value)
+    else {
+      def toTree(edge: Edge[A, Id], parentId: Id): Tree[A, Id] = {
+        val childEdges = edgesByParentId.getOrElse(edge.nodeId, Set.empty)
+        Tree(edge.nodeId, edge.payload, childEdges.map(toTree(_, edge.nodeId)))
+      }
 
-    for {
-      edge <- edgesByNodeId.get(nodeId)
-      children = edgesByParentId.getOrElse(nodeId, Set.empty)
-    } yield Tree(nodeId, edge.payload, children.map(toTree(_, nodeId)))
-  }
+      for {
+        edge <- edgesByNodeId.get(nodeId)
+        children = edgesByParentId.getOrElse(nodeId, Set.empty)
+      } yield Tree(nodeId, edge.payload, children.map(toTree(_, nodeId)))
+    }
 
   private[tree]
   def prepareCreateChildNode(parentId: Id, nodeId: Id, payload: A): Try[Option[CreateChildNodeOpPrepared[Id, A]]] =
@@ -62,8 +64,10 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   private[tree]
   def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): TreeCRDT[A, Id] = ???
 
+  private def isRoot(nodeId: Id): Boolean = nodeId == treeConfig.rootNodeId
+
   private def nodeExists(nodeId: Id): Boolean =
-    nodeId == treeConfig.rootNodeId || edgesByNodeId.contains(nodeId)
+    isRoot(nodeId) || edgesByNodeId.contains(nodeId)
 
   private def addEdge(edge: Edge[A, Id]): TreeCRDT[A, Id] =
     copy(

@@ -30,7 +30,7 @@ class TreeCRDTChaosSpecLeveldb extends WordSpec with Matchers with MultiLocation
   }
 
   private implicit val treeConfig: TreeConfig[String, String] =
-    TreeConfig[String, String]("root", "rootPayload")
+    TreeConfig[String, String]("root", "root's payload")
 
   private val customConfig: Config = ConfigFactory.parseString(
     """eventuate.log.write-batch-size = 3
