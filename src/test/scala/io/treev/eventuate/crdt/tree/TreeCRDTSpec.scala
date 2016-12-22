@@ -5,7 +5,7 @@ import com.rbmhtechnology.eventuate.crdt.ORSet
 import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
 import io.treev.eventuate.crdt.tree.model.internal.{Edge, ServiceInfo}
 import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
-import io.treev.eventuate.crdt.tree.model.{ConflictResolver, MappingPolicy, Tree, TreeConfig}
+import io.treev.eventuate.crdt.tree.model._
 import org.scalatest.OptionValues._
 import org.scalatest.{Assertion, Matchers, WordSpec}
 
@@ -235,7 +235,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[String, String] =
-          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.Zero))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero))
 
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
@@ -253,7 +253,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[String, String] =
-          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
           treeCRDT(
@@ -287,7 +287,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[String, String] =
-          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
           treeCRDT(
@@ -320,7 +320,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[String, String] =
-          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingSystemTimestamp: Long, systemTimestamp: Long, expectedPayload: Payload): Assertion = {
           treeCRDT(
@@ -357,7 +357,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[String, String] =
-          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         val systemTimestamp = System.currentTimeMillis()
 
@@ -399,7 +399,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           implicit val resolver = ConflictResolver.instance[Payload]((p1, _) => p1 == expectedPayload)
 
           val config: TreeConfig[String, String] =
-            treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.Custom()))
+            treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Custom()))
 
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
@@ -421,6 +421,40 @@ class TreeCRDTSpec extends WordSpec with Matchers {
 
         test(expectedPayload = payload2) // keep
         test(expectedPayload = payload3) // replace
+      }
+
+      "skip node if parent node is deleted concurrently when Skip connection policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, _) = node(2)
+        val (node3Id, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Skip))
+
+        treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1)
+        )(config)
+          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
+          .value should be {
+          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1)))
+        }
+      }
+
+      "put node under root if parent node is deleted concurrently when Root connection policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, _) = node(2)
+        val (node3Id, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Root))
+
+        treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1)
+        )(config)
+          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
+          .value should be {
+          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1), Tree(node3Id, payload3)))
+        }
       }
 
     }

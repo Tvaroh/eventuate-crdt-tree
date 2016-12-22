@@ -7,16 +7,12 @@ case class TreeConfig[A, Id](rootNodeId: Id,
 
 /** Conflicts resolution policies.
   * @param connectionPolicy concurrent addition/removal conflict resolution policy
-  * @param sameParentMappingPolicy concurrent addition under same parent conflict resolution policy
-  *                                ('custom' policy is applied to payload)
-  * @param mappingPolicy concurrent addition under different parents conflict resolution policy
-  *                      ('custom' policy is applied to parents ids) */
+  * @param mappingPolicy concurrent addition conflict resolution policy */
 case class Policies[A, Id](connectionPolicy: ConnectionPolicy,
-                           sameParentMappingPolicy: MappingPolicy[A],
-                           mappingPolicy: MappingPolicy[Id])
+                           mappingPolicy: MappingPolicy[A])
 object Policies {
   def default[A, Id]: Policies[A, Id] =
-    Policies(ConnectionPolicy.Root, MappingPolicy.LastWriteWins, MappingPolicy.LastWriteWins)
+    Policies(ConnectionPolicy.Root, MappingPolicy.LastWriteWins)
 }
 
 /** Concurrent addition/removal conflict resolution policy. */

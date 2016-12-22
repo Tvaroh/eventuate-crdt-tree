@@ -1,7 +1,7 @@
 package io.treev.eventuate.crdt.tree
 
 import com.rbmhtechnology.eventuate.DurableEvent
-import com.rbmhtechnology.eventuate.crdt.{CRDTFormat, CRDTServiceOps, ORSet}
+import com.rbmhtechnology.eventuate.crdt.{CRDTServiceOps, ORSet}
 import io.treev.eventuate.crdt.tree.model._
 import io.treev.eventuate.crdt.tree.model.exception._
 import io.treev.eventuate.crdt.tree.model.internal._
@@ -13,8 +13,7 @@ import scala.util.{Failure, Success, Try}
 case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
                            edgesByNodeId: Map[Id, Edge[A, Id]] = Map.empty[Id, Edge[A, Id]],
                            edgesByParentId: Map[Id, Map[Id, Edge[A, Id]]] = Map.empty[Id, Map[Id, Edge[A, Id]]])
-                          (implicit treeConfig: TreeConfig[A, Id])
-  extends CRDTFormat {
+                          (implicit treeConfig: TreeConfig[A, Id]) {
 
   /** Get whole tree value from underlying CRDT. */
   def value: Tree[A, Id] = {
@@ -49,13 +48,11 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
     val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload, serviceInfo)
 
     if (nodeExists(prepared.parentId))
-      edgesByNodeId.get(prepared.nodeId).fold {
-        addEdge(edge)
-      } { existingEdge => // concurrent addition conflict
-        resolveConcurrentAddition(existingEdge, edge)
-      }
-    else // concurrent addition/deletion conflict
-      ???
+      edgesByNodeId
+        .get(prepared.nodeId)
+        .fold(addEdge(edge))(resolveConcurrentAddition(_, edge))
+    else
+      resolveConcurrentAdditionDeletion(edge)
   }
 
   private[tree]
@@ -105,7 +102,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
     else applyMappingPolicy(existingEdge, edge)
 
   private def applyMappingPolicy(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =
-    treeConfig.policies.sameParentMappingPolicy match {
+    treeConfig.policies.mappingPolicy match {
       case MappingPolicy.Zero =>
         removeEdge(existingEdge)
 
@@ -135,6 +132,14 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
             !(first.vectorTimestamp < second.vectorTimestamp) // second happened last
       }
       .head
+
+  private def resolveConcurrentAdditionDeletion(edge: Edge[A, Id]): TreeCRDT[A, Id] =
+    treeConfig.policies.connectionPolicy match {
+      case ConnectionPolicy.Skip =>
+        this
+      case ConnectionPolicy.Root =>
+        addEdge(edge.copy(parentId = treeConfig.rootNodeId))
+    }
 
 }
 
