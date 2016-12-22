@@ -123,15 +123,16 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   private def getLastWriteWinner(edge1: Edge[A, Id], edge2: Edge[A, Id]): Edge[A, Id] =
     Seq(edge1, edge2)
       .sortWith { case (Edge(_, _, _, first), Edge(_, _, _, second)) =>
-        first.vectorTimestamp > second.vectorTimestamp || // first happened last
-          !(first.vectorTimestamp < second.vectorTimestamp) || { // second happened last
-          first.vectorTimestamp <-> second.vectorTimestamp && { // concurrent
-            if (first.systemTimestamp != second.systemTimestamp)
-              first.systemTimestamp > second.systemTimestamp // first happened last
-            else // both happened simultaneously - use one with lesser (alphabetically) emitter id
-              first.emitterId < second.emitterId
-          }
-        }
+        if (first.vectorTimestamp <-> second.vectorTimestamp) // concurrent
+          if (first.systemTimestamp != second.systemTimestamp)
+            first.systemTimestamp > second.systemTimestamp // first happened last
+          else // both happened simultaneously - use one with lesser (alphabetically) emitter id
+            first.emitterId < second.emitterId
+        else if (first.vectorTimestamp equiv second.vectorTimestamp)
+          first.emitterId < second.emitterId
+        else
+          first.vectorTimestamp > second.vectorTimestamp || // first happened last
+            !(first.vectorTimestamp < second.vectorTimestamp) // second happened last
       }
       .head
 

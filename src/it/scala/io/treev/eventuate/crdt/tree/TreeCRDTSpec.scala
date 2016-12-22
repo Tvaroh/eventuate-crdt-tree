@@ -247,6 +247,149 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         }
       }
 
+      "resolve conflict by comparing vector timestamps when LastWriteWins mapping policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val (_, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+
+        def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
+          treeCRDT(
+            edge(treeConfig.rootNodeId, node1Id, payload1),
+            edge(node1Id, node2Id, payload2, mkServiceInfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
+          )(config)
+            .createChildNode(
+              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              mkServiceInfo(mkVectorTimestamp(logicalTime = logicalTime))
+            )
+            .value should be {
+            Tree(
+              treeConfig.rootNodeId, treeConfig.rootPayload,
+              Set(
+                Tree(
+                  node1Id, payload1,
+                  Set(Tree(node2Id, expectedPayload))
+                )
+              )
+            )
+          }
+        }
+
+        test(existingLogicalTime = 2, logicalTime = 1, expectedPayload = payload2) // keep
+        test(existingLogicalTime = 1, logicalTime = 2, expectedPayload = payload3) // replace
+      }
+
+      "resolve conflict by comparing emitter ids if vector timestamps are equal when LastWriteWins mapping policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val (_, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+
+        def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
+          treeCRDT(
+            edge(treeConfig.rootNodeId, node1Id, payload1),
+            edge(node1Id, node2Id, payload2, mkServiceInfo(emitterId = existingEmitterId))
+          )(config)
+            .createChildNode(
+              CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkServiceInfo(emitterId = emitterId)
+            )
+            .value should be {
+            Tree(
+              treeConfig.rootNodeId, treeConfig.rootPayload,
+              Set(
+                Tree(
+                  node1Id, payload1,
+                  Set(Tree(node2Id, expectedPayload))
+                )
+              )
+            )
+          }
+        }
+
+        test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
+        test(existingEmitterId = "B", emitterId = "A", expectedPayload = payload3) // replace
+      }
+
+      "resolve conflict by comparing non-equal system timestamps when LastWriteWins mapping policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val (_, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+
+        def test(existingSystemTimestamp: Long, systemTimestamp: Long, expectedPayload: Payload): Assertion = {
+          treeCRDT(
+            edge(treeConfig.rootNodeId, node1Id, payload1),
+            edge(
+              node1Id, node2Id, payload2,
+              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
+            )
+          )(config)
+            .createChildNode(
+              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
+            )
+            .value should be {
+            Tree(
+              treeConfig.rootNodeId, treeConfig.rootPayload,
+              Set(
+                Tree(
+                  node1Id, payload1,
+                  Set(Tree(node2Id, expectedPayload))
+                )
+              )
+            )
+          }
+        }
+
+        test(existingSystemTimestamp = 1000L, systemTimestamp = 999L, expectedPayload = payload2) // keep
+        test(existingSystemTimestamp = 999L, systemTimestamp = 1000L, expectedPayload = payload3) // replace
+      }
+
+      "resolve conflict by comparing emitter ids if system timestamps are equal when LastWriteWins mapping policy is used" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val (_, payload3) = node(3)
+
+        val config: TreeConfig[String, String] =
+          treeConfig.copy(policies = treeConfig.policies.copy(sameParentMappingPolicy = MappingPolicy.LastWriteWins))
+
+        val systemTimestamp = System.currentTimeMillis()
+
+        def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
+          treeCRDT(
+            edge(treeConfig.rootNodeId, node1Id, payload1),
+            edge(
+              node1Id, node2Id, payload2,
+              mkServiceInfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
+            )
+          )(config)
+            .createChildNode(
+              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              mkServiceInfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
+            )
+            .value should be {
+            Tree(
+              treeConfig.rootNodeId, treeConfig.rootPayload,
+              Set(
+                Tree(
+                  node1Id, payload1,
+                  Set(Tree(node2Id, expectedPayload))
+                )
+              )
+            )
+          }
+        }
+
+        test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
+        test(existingEmitterId = "B", emitterId = "A", expectedPayload = payload3) // replace
+      }
+
       "resolve conflict if same node is added concurrently under same parent when Custom mapping policy is used" in {
         val (node1Id, payload1) = node(1)
         val (node2Id, payload2) = node(2)
@@ -314,9 +457,12 @@ class TreeCRDTSpec extends WordSpec with Matchers {
   private def node(number: Int): (String, String) =
     (s"child$number", s"child$number's payload")
 
-  private def mkVectorTimestamp(): VectorTime = VectorTime(Map.empty[String, Long])
+  private def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
+    VectorTime(Map(processId -> logicalTime))
 
-  private def mkServiceInfo(): ServiceInfo =
-    ServiceInfo(mkVectorTimestamp(), "L1", System.currentTimeMillis())
+  private def mkServiceInfo(vectorTimestamp: VectorTime = mkVectorTimestamp(),
+                            emitterId: String = "L1",
+                            systemTimestamp: Long = System.currentTimeMillis()): ServiceInfo =
+    ServiceInfo(vectorTimestamp, emitterId, systemTimestamp)
 
 }
