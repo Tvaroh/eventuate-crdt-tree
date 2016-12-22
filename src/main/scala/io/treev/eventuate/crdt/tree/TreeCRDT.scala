@@ -56,10 +56,30 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   }
 
   private[tree]
-  def prepareDeleteSubTree(nodeId: Id): Try[Option[DeleteSubTreeOpPrepared[Id]]] = ???
+  def prepareDeleteSubTree(nodeId: Id): Try[Option[DeleteSubTreeOpPrepared[Id]]] =
+    edgesByNodeId
+      .get(nodeId)
+      .map { edge =>
+        val children = getChildEdges(edge)
+        val timestamps = children.flatMap(edges.prepareRemove).toSet ++ edges.prepareRemove(edge)
+        val nodeIds = children.view.map(_.nodeId).toSet + nodeId
+        Success(Some(DeleteSubTreeOpPrepared(nodeId, edge.parentId, nodeIds, timestamps)))
+      }
+      .getOrElse(Failure(NodeNotExistsException(nodeId)))
 
   private[tree]
-  def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): TreeCRDT[A, Id] = ???
+  def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): TreeCRDT[A, Id] =
+    copy(
+      edges = edges.remove(prepared.timestamps),
+      edgesByNodeId = edgesByNodeId -- prepared.nodeIds,
+      edgesByParentId = {
+        val edgesByParentIdLeft = edgesByParentId -- prepared.nodeIds
+        edgesByParentIdLeft.updated(
+          prepared.parentId,
+          edgesByParentIdLeft.get(prepared.parentId).map(_ - prepared.nodeId).getOrElse(Map.empty)
+        )
+      }
+    )
 
   private def isRoot(nodeId: Id): Boolean = nodeId == treeConfig.rootNodeId
 
@@ -141,6 +161,22 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
         addEdge(edge.copy(parentId = treeConfig.rootNodeId))
     }
 
+  private def getChildEdges(edge: Edge[A, Id]): Iterable[Edge[A, Id]] = {
+    @annotation.tailrec
+    def loop(parentIds: Iterable[Id], acc: Iterable[Edge[A, Id]]): Iterable[Edge[A, Id]] =
+      if (parentIds.nonEmpty) {
+        val childEdges = parentIds.flatMap { parentId =>
+          edgesByParentId.get(parentId).fold(Iterable.empty[Edge[A, Id]])(_.values)
+        }
+
+        loop(childEdges.map(_.nodeId), acc ++ childEdges)
+      } else {
+        acc
+      }
+
+    loop(Iterable(edge.nodeId), Iterable.empty)
+  }
+
 }
 
 object TreeCRDT {
@@ -168,7 +204,7 @@ object TreeCRDT {
       operation match {
         case CreateChildNodeOpPrepared(_, _, _) =>
           crdt.createChildNode(operation.asInstanceOf[CreateChildNodeOpPrepared[Id, A]], toServiceInfo(event))
-        case DeleteSubTreeOpPrepared(_, _, _) =>
+        case DeleteSubTreeOpPrepared(_, _, _, _) =>
           crdt.deleteSubTree(operation.asInstanceOf[DeleteSubTreeOpPrepared[Id]])
       }
 

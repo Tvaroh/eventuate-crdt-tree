@@ -2,7 +2,7 @@ package io.treev.eventuate.crdt.tree
 
 import com.rbmhtechnology.eventuate.VectorTime
 import com.rbmhtechnology.eventuate.crdt.ORSet
-import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, ParentNodeNotExistsException}
+import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, NodeNotExistsException, ParentNodeNotExistsException}
 import io.treev.eventuate.crdt.tree.model.internal.{Edge, ServiceInfo}
 import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
 import io.treev.eventuate.crdt.tree.model._
@@ -141,9 +141,8 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node1Id, payload1) = node(1)
         val (node2Id, payload2) = node(2)
 
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1)
-        ).createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkServiceInfo())
+        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
+          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkServiceInfo())
           .value should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -163,9 +162,8 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node1Id, payload1) = node(1)
         val (node2Id, payload2) = node(2)
 
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1)
-        ).createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkServiceInfo())
+        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkServiceInfo())
           .value should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -234,7 +232,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero))
 
         treeCRDT(
@@ -252,7 +250,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
@@ -286,7 +284,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
@@ -319,7 +317,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         def test(existingSystemTimestamp: Long, systemTimestamp: Long, expectedPayload: Payload): Assertion = {
@@ -356,7 +354,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
 
         val systemTimestamp = System.currentTimeMillis()
@@ -398,7 +396,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         def test(expectedPayload: Payload): Assertion = {
           implicit val resolver = ConflictResolver.instance[Payload]((p1, _) => p1 == expectedPayload)
 
-          val config: TreeConfig[String, String] =
+          val config: TreeConfig[Payload, Id] =
             treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Custom()))
 
           treeCRDT(
@@ -428,12 +426,10 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, _) = node(2)
         val (node3Id, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Skip))
 
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1)
-        )(config)
+        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
           .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
           .value should be {
           Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1)))
@@ -445,16 +441,26 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, _) = node(2)
         val (node3Id, payload3) = node(3)
 
-        val config: TreeConfig[String, String] =
+        val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Root))
 
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1)
-        )(config)
+        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
           .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
           .value should be {
           Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1), Tree(node3Id, payload3)))
         }
+      }
+
+    }
+
+    "prepareDeleteSubTree" must {
+
+      "fail with NodeNotExistsException if node id doesn't exist" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, _) = node(2)
+
+        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
+          .prepareDeleteSubTree(node2Id) should be (Failure(NodeNotExistsException(node2Id)))
       }
 
     }
@@ -464,8 +470,8 @@ class TreeCRDTSpec extends WordSpec with Matchers {
   private type Id = String
   private type Payload = String
 
-  private implicit val treeConfig: TreeConfig[String, String] =
-    TreeConfig[String, String]("root", "root's payload")
+  private implicit val treeConfig: TreeConfig[Payload, Id] =
+    TreeConfig[Payload, Id]("root", "root's payload")
 
   private def treeCRDT: TreeCRDT[Payload, Id] = TreeCRDT[Payload, Id]
 
