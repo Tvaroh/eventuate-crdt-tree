@@ -4,7 +4,7 @@ import com.rbmhtechnology.eventuate.VectorTime
 import com.rbmhtechnology.eventuate.crdt.ORSet
 import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, NodeNotExistsException, ParentNodeNotExistsException}
 import io.treev.eventuate.crdt.tree.model.internal.{Edge, ServiceInfo}
-import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
+import io.treev.eventuate.crdt.tree.model.op.{CreateChildNodeOpPrepared, DeleteSubTreeOpPrepared}
 import io.treev.eventuate.crdt.tree.model._
 import org.scalatest.OptionValues._
 import org.scalatest.{Assertion, Matchers, WordSpec}
@@ -455,12 +455,85 @@ class TreeCRDTSpec extends WordSpec with Matchers {
 
     "prepareDeleteSubTree" must {
 
+      "gather latest timestamps and node ids of all affected nodes" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val ((node3Id, payload3), logicalTime3) = (node(3), mkVectorTimestamp(logicalTime = 30L))
+        val ((node4Id, payload4), logicalTime4) = (node(4), mkVectorTimestamp(logicalTime = 40L))
+        val ((node5Id, payload5), logicalTime5) = (node(5), mkVectorTimestamp(logicalTime = 50L))
+
+        treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1),
+          edge(node1Id, node2Id, payload2),
+          edge(node1Id, node3Id, payload3, mkServiceInfo(logicalTime3)),
+          edge(node3Id, node4Id, payload4, mkServiceInfo(logicalTime4)),
+          edge(node3Id, node5Id, payload5, mkServiceInfo(logicalTime5))
+        ).prepareDeleteSubTree(node3Id) should be {
+          Success(Some(
+            DeleteSubTreeOpPrepared(
+              node3Id, node1Id,
+              Set(node3Id, node4Id, node5Id),
+              Set(logicalTime3, logicalTime4, logicalTime5)
+            )
+          ))
+        }
+      }
+
       "fail with NodeNotExistsException if node id doesn't exist" in {
         val (node1Id, payload1) = node(1)
         val (node2Id, _) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
           .prepareDeleteSubTree(node2Id) should be (Failure(NodeNotExistsException(node2Id)))
+      }
+
+      "fail with NodeNotExistsException when deleting root node" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+
+        treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1),
+          edge(node1Id, node2Id, payload2)
+        ).prepareDeleteSubTree(treeConfig.rootNodeId) should be (Failure(NodeNotExistsException(treeConfig.rootNodeId)))
+      }
+
+    }
+
+    "deleteSubTree" must {
+
+      "remove affected nodes from internal ORSet of edges and lookup maps" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        val ((node3Id, payload3), logicalTime3) = (node(3), mkVectorTimestamp(logicalTime = 30L))
+        val ((node4Id, payload4), logicalTime4) = (node(4), mkVectorTimestamp(logicalTime = 40L))
+        val ((node5Id, payload5), logicalTime5) = (node(5), mkVectorTimestamp(logicalTime = 50L))
+
+        val result = treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1),
+          edge(node1Id, node2Id, payload2),
+          edge(node1Id, node3Id, payload3, mkServiceInfo(logicalTime3)),
+          edge(node3Id, node4Id, payload4, mkServiceInfo(logicalTime4)),
+          edge(node3Id, node5Id, payload5, mkServiceInfo(logicalTime5))
+        ).deleteSubTree(
+          DeleteSubTreeOpPrepared(
+            node3Id, node1Id,
+            Set(node3Id, node4Id, node5Id),
+            Set(logicalTime3, logicalTime4, logicalTime5)
+          )
+        )
+
+        val deletedNodeIds = Set(node3Id, node4Id, node5Id)
+
+        result.edgesServiceInfo.keys should not contain allElementsOf (deletedNodeIds)
+        result.edgesByNodeId.keys should not contain allElementsOf (deletedNodeIds)
+        result.edgesByParentId.keys should not contain allElementsOf (deletedNodeIds)
+
+        result.value should be {
+          Tree(
+            treeConfig.rootNodeId, treeConfig.rootPayload,
+            Set(Tree(node1Id, payload1, Set(Tree(node2Id, payload2))))
+          )
+        }
       }
 
     }
@@ -475,24 +548,27 @@ class TreeCRDTSpec extends WordSpec with Matchers {
 
   private def treeCRDT: TreeCRDT[Payload, Id] = TreeCRDT[Payload, Id]
 
-  private def treeCRDT(edges: Edge[Payload, Id]*)
+  private def treeCRDT(edges: (Edge[Payload, Id], ServiceInfo)*)
                       (implicit treeConfig: TreeConfig[Payload, Id]): TreeCRDT[Payload, Id] = {
     val edgesORSet =
-      edges.foldLeft(ORSet[Edge[Payload, Id]])((orSet, edge) => orSet.add(edge, edge.serviceInfo.vectorTimestamp))
+      edges.foldLeft(ORSet[Edge[Payload, Id]]) {
+        case (orSet, (edge, serviceInfo)) => orSet.add(edge, serviceInfo.vectorTimestamp)
+      }
+    val edgesServiceInfo =
+      edges.map({ case (edge, serviceInfo) => (edge.nodeId, serviceInfo) }).toMap
     val edgesByNodeId =
-      edges.map(edge => (edge.nodeId, edge)).toMap
+      edges.map(_._1).map(edge => (edge.nodeId, edge)).toMap
     val edgesByParentId =
-      edges.groupBy(_.parentId).mapValues(_.map(edge => (edge.nodeId, edge)).toMap)
+      edges.map(_._1).groupBy(_.parentId).mapValues(_.map(edge => (edge.nodeId, edge)).toMap)
 
-    TreeCRDT[Payload, Id](edgesORSet, edgesByNodeId, edgesByParentId)
+    TreeCRDT[Payload, Id](edgesORSet, edgesServiceInfo, edgesByNodeId, edgesByParentId)
   }
 
   private def edge(parentId: Id,
                    nodeId: Id,
                    payload: Payload,
-                   serviceInfo: ServiceInfo = mkServiceInfo()): Edge[Payload, Id] = {
-    Edge(nodeId, parentId, payload, serviceInfo)
-  }
+                   serviceInfo: ServiceInfo = mkServiceInfo()): (Edge[Payload, Id], ServiceInfo) =
+    (Edge(nodeId, parentId, payload), serviceInfo)
 
   private def node(number: Int): (String, String) =
     (s"child$number", s"child$number's payload")

@@ -11,6 +11,7 @@ import scala.util.{Failure, Success, Try}
 
 /** Unordered tree CRDT. */
 case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
+                           edgesServiceInfo: Map[Id, ServiceInfo] = Map.empty[Id, ServiceInfo],
                            edgesByNodeId: Map[Id, Edge[A, Id]] = Map.empty[Id, Edge[A, Id]],
                            edgesByParentId: Map[Id, Map[Id, Edge[A, Id]]] = Map.empty[Id, Map[Id, Edge[A, Id]]])
                           (implicit treeConfig: TreeConfig[A, Id]) {
@@ -45,14 +46,14 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
 
   private[tree]
   def createChildNode(prepared: CreateChildNodeOpPrepared[Id, A], serviceInfo: ServiceInfo): TreeCRDT[A, Id] = {
-    val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload, serviceInfo)
+    val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload)
 
     if (nodeExists(prepared.parentId))
       edgesByNodeId
         .get(prepared.nodeId)
-        .fold(addEdge(edge))(resolveConcurrentAddition(_, edge))
+        .fold(addEdge(edge, serviceInfo))(resolveConcurrentAddition(_, edge, serviceInfo))
     else
-      resolveConcurrentAdditionDeletion(edge)
+      resolveConcurrentAdditionDeletion(edge, serviceInfo)
   }
 
   private[tree]
@@ -71,6 +72,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): TreeCRDT[A, Id] =
     copy(
       edges = edges.remove(prepared.timestamps),
+      edgesServiceInfo = edgesServiceInfo -- prepared.nodeIds,
       edgesByNodeId = edgesByNodeId -- prepared.nodeIds,
       edgesByParentId = {
         val edgesByParentIdLeft = edgesByParentId -- prepared.nodeIds
@@ -86,18 +88,20 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   private def nodeExists(nodeId: Id): Boolean =
     isRoot(nodeId) || edgesByNodeId.contains(nodeId)
 
-  private def addEdge(edge: Edge[A, Id]): TreeCRDT[A, Id] =
+  private def addEdge(edge: Edge[A, Id], serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
     copy(
-      edges = edges.add(edge, edge.serviceInfo.vectorTimestamp),
+      edges = edges.add(edge, serviceInfo.vectorTimestamp),
+      edgesServiceInfo = edgesServiceInfo.updated(edge.nodeId, serviceInfo),
       edgesByNodeId = edgesByNodeId.updated(edge.nodeId, edge),
       edgesByParentId = edgesByParentId
         .updated(edge.parentId, edgesByParentId.getOrElse(edge.parentId, Map.empty).updated(edge.nodeId, edge))
     )
 
-  private def replaceEdge(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =
+  private def replaceEdge(existingEdge: Edge[A, Id], edge: Edge[A, Id], serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
     copy(
       edges = // TODO ensure this does commute
-        edges.remove(edges.prepareRemove(existingEdge)).add(edge, edge.serviceInfo.vectorTimestamp),
+        edges.remove(edges.prepareRemove(existingEdge)).add(edge, serviceInfo.vectorTimestamp),
+      edgesServiceInfo = edgesServiceInfo.updated(existingEdge.nodeId, serviceInfo),
       edgesByNodeId = edgesByNodeId.updated(existingEdge.nodeId, edge),
       edgesByParentId = edgesByParentId
         .updated(
@@ -110,36 +114,43 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
     copy(
       edges = // TODO ensure this does commute
         edges.remove(edges.prepareRemove(edge)),
+      edgesServiceInfo = edgesServiceInfo - edge.nodeId,
       edgesByNodeId = edgesByNodeId - edge.nodeId,
       edgesByParentId = edgesByParentId
         .updated(edge.parentId, edgesByParentId.get(edge.parentId).map(_ - edge.nodeId).getOrElse(Map.empty))
     )
 
-  private def resolveConcurrentAddition(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =
+  private def resolveConcurrentAddition(existingEdge: Edge[A, Id],
+                                        edge: Edge[A, Id],
+                                        serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
     if (existingEdge.parentId == edge.parentId) // both nodes are under same parent
       if (existingEdge.payload == edge.payload) this // nodes are equal
-      else applyMappingPolicy(existingEdge, edge)
-    else applyMappingPolicy(existingEdge, edge)
+      else applyMappingPolicy(existingEdge, edge, serviceInfo)
+    else applyMappingPolicy(existingEdge, edge, serviceInfo)
 
-  private def applyMappingPolicy(existingEdge: Edge[A, Id], edge: Edge[A, Id]): TreeCRDT[A, Id] =
+  private def applyMappingPolicy(existingEdge: Edge[A, Id],
+                                 edge: Edge[A, Id],
+                                 serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
     treeConfig.policies.mappingPolicy match {
       case MappingPolicy.Zero =>
         removeEdge(existingEdge)
 
       case MappingPolicy.LastWriteWins =>
-        val winner = getLastWriteWinner(existingEdge, edge)
-        if (winner eq existingEdge) this else replaceEdge(existingEdge, edge)
+        val existingEdgeServiceInfo = edgesServiceInfo(existingEdge.nodeId)
+        val winner = getLastWriteWinner(existingEdge, existingEdgeServiceInfo, edge, serviceInfo)
+        if (winner eq existingEdge) this else replaceEdge(existingEdge, edge, serviceInfo)
 
       case policy@MappingPolicy.Custom() =>
         if (policy.resolver.firstWins(existingEdge.payload, edge.payload))
           this // existing node won
         else
-          replaceEdge(existingEdge, existingEdge.copy(payload = edge.payload)) // update payload
+          replaceEdge(existingEdge, existingEdge.copy(payload = edge.payload), serviceInfo) // update payload
     }
 
-  private def getLastWriteWinner(edge1: Edge[A, Id], edge2: Edge[A, Id]): Edge[A, Id] =
-    Seq(edge1, edge2)
-      .sortWith { case (Edge(_, _, _, first), Edge(_, _, _, second)) =>
+  private def getLastWriteWinner(edge1: Edge[A, Id], edge1ServiceInfo: ServiceInfo,
+                                 edge2: Edge[A, Id], edge2ServiceInfo: ServiceInfo): Edge[A, Id] =
+    Seq((edge1, edge1ServiceInfo), (edge2, edge2ServiceInfo))
+      .sortWith { case ((_, first), (_, second)) =>
         if (first.vectorTimestamp <-> second.vectorTimestamp) // concurrent
           if (first.systemTimestamp != second.systemTimestamp)
             first.systemTimestamp > second.systemTimestamp // first happened last
@@ -152,13 +163,14 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
             !(first.vectorTimestamp < second.vectorTimestamp) // second happened last
       }
       .head
+      ._1
 
-  private def resolveConcurrentAdditionDeletion(edge: Edge[A, Id]): TreeCRDT[A, Id] =
+  private def resolveConcurrentAdditionDeletion(edge: Edge[A, Id], serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
     treeConfig.policies.connectionPolicy match {
       case ConnectionPolicy.Skip =>
         this
       case ConnectionPolicy.Root =>
-        addEdge(edge.copy(parentId = treeConfig.rootNodeId))
+        addEdge(edge.copy(parentId = treeConfig.rootNodeId), serviceInfo)
     }
 
   private def getChildEdges(edge: Edge[A, Id]): Iterable[Edge[A, Id]] = {
