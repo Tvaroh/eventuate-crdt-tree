@@ -126,6 +126,14 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         }
       }
 
+      "fail with NodeAlreadyExistsException when adding node with same id as root" in {
+        val (nodeId, payload) = node(1)
+        treeCRDT(edge(treeConfig.rootNodeId, nodeId, payload))
+          .prepareCreateChildNode(treeConfig.rootNodeId, treeConfig.rootNodeId, payload) should be {
+          Failure(NodeAlreadyExistsException(treeConfig.rootNodeId))
+        }
+      }
+
     }
 
     "createChildNode" must {

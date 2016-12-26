@@ -28,7 +28,7 @@ object ConnectionPolicy {
 }
 
 /** Concurrent addition conflict resolution policy. */
-sealed trait MappingPolicy[+T]
+sealed trait MappingPolicy[+A]
 object MappingPolicy {
 
   /** Remove both conflicted nodes. */
@@ -37,9 +37,10 @@ object MappingPolicy {
   /** Use "last write wins" conflict resolution policy. */
   case object LastWriteWins extends MappingPolicy[Nothing]
 
-  /** Resolve conflict using user-defined `ConflictResolver` typeclass. */
-  case class Custom[T : ConflictResolver]() extends MappingPolicy[T] {
-    val resolver: ConflictResolver[T] = implicitly
+  /** Resolve conflict using user-defined `ConflictResolver` typeclass.
+    * @tparam A payload type */
+  case class Custom[A : ConflictResolver]() extends MappingPolicy[A] {
+    val resolver: ConflictResolver[A] = implicitly
   }
 
 }
@@ -53,9 +54,9 @@ trait ConflictResolver[-T] {
 }
 object ConflictResolver {
 
-  def apply[T : ConflictResolver]: ConflictResolver[T] = implicitly
+  def apply[A : ConflictResolver]: ConflictResolver[A] = implicitly
 
-  def instance[T](firstWinsF: (T, T) => Boolean): ConflictResolver[T] =
-    (first: T, second: T) => firstWinsF(first, second)
+  def instance[A](firstWinsF: (A, A) => Boolean): ConflictResolver[A] =
+    (first: A, second: A) => firstWinsF(first, second)
 
 }

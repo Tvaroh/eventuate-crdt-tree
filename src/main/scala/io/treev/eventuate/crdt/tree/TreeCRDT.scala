@@ -83,7 +83,8 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
       }
     )
 
-  private def isRoot(nodeId: Id): Boolean = nodeId == treeConfig.rootNodeId
+  private def isRoot(nodeId: Id): Boolean =
+    nodeId == treeConfig.rootNodeId
 
   private def nodeExists(nodeId: Id): Boolean =
     isRoot(nodeId) || edgesByNodeId.contains(nodeId)
