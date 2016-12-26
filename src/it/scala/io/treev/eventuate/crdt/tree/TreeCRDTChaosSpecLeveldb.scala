@@ -4,7 +4,7 @@ import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
 
 import akka.testkit.TestProbe
-import com.rbmhtechnology.eventuate.{MultiLocationSpecLeveldb, ReplicationEndpoint}
+import com.rbmhtechnology.eventuate.{Location, MultiLocationSpecLeveldb, ReplicationEndpoint}
 import com.typesafe.config.{Config, ConfigFactory}
 import io.treev.eventuate.crdt.tree.model.{ConflictResolver, MappingPolicy, Tree, TreeConfig}
 import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
@@ -12,6 +12,7 @@ import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
+import scala.util.Random
 
 class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLocationSpecLeveldb {
   import com.rbmhtechnology.eventuate.ReplicationIntegrationSpec.replicationConnection
@@ -20,47 +21,27 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
 
     def convergeConcurrentAdditionsSameParent(mappingPolicy: MappingPolicy[Payload]): Future[Assertion] = {
       implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = mappingPolicy))
+      val setup = new TestSetup; import setup._
 
-      val numLocations = 4
-
-      val locationA = location("A", customConfig = customConfig)
-      val locationB = location("B", customConfig = customConfig)
-      val locationC = location("C", customConfig = customConfig)
-      val locationD = location("D", customConfig = customConfig)
-
-      val endpointA = locationA.endpoint(Set("L1"), Set(replicationConnection(locationB.port), replicationConnection(locationC.port), replicationConnection(locationD.port)))
-      val endpointB = locationB.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
-      val endpointC = locationC.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
-      val endpointD = locationD.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
-
-      val (serviceA, probeA) = service(endpointA, numLocations)
-      val (serviceB, probeB) = service(endpointB, numLocations)
-      val (serviceC, probeC) = service(endpointC, numLocations)
-      val (serviceD, probeD) = service(endpointD, numLocations)
-
-      val services = Seq(serviceA, serviceB, serviceC, serviceD)
-      val probes = Seq(probeA, probeB, probeC, probeD)
-
-      val (node0Id, _) = node(0)
+      val (parentId, parentPayload) = node(1)
 
       def batchAdd(service: TreeCRDTService[Payload, Id]): Future[Unit] =
         (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
           .foldLeft(Future.successful(())) {
             case (acc, _) =>
-              val (nodeId, payload) = randomNode(1, 8)
-              acc.flatMap(_ => createChildNodeMaskingErrors(service, node0Id, nodeId, payload))
+              val (nodeId, payload) = randomNode(10, 20)
+              acc.flatMap(_ => createChildNodeMaskingErrors(service, parentId, nodeId, payload))
           }
 
       for {
+        _ <- serviceA.createChildNode(crdtId, treeConfig.rootNodeId, parentId, parentPayload)
         _ <- Future.sequence(services.map(start))
         _ <- Future.sequence(services.map(service => batchAdd(service).flatMap(_ => stop(service))))
       } yield {
-        probeA.expectMsg(Messages.started)
-        probeB.expectMsg(Messages.started)
-        probeC.expectMsg(Messages.started)
-        probeD.expectMsg(Messages.started)
+        probes.map(_.expectMsg(Messages.started))
 
-        probes.map(getValue).distinct.size should be (1) // should converge to same value
+        val values = probes.map(getValue)
+        values.distinct.size should be (1) // should converge to same value
       }
     }
 
@@ -77,10 +58,108 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
       convergeConcurrentAdditionsSameParent(MappingPolicy.Custom())
     }
 
+    def convergeConcurrentAdditionsDifferentParents(mappingPolicy: MappingPolicy[Payload]): Future[Assertion] = {
+      implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = mappingPolicy))
+      val setup = new TestSetup; import setup._
+
+      val parentNumbers = 1 to 5
+      val parentNodes = parentNumbers.map(node)
+
+      def batchAdd(service: TreeCRDTService[Payload, Id]): Future[Unit] =
+        (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
+          .foldLeft(Future.successful(())) {
+            case (acc, _) =>
+              val parentId = parentNodes(Random.nextInt(parentNodes.size))._1
+              val (nodeId, payload) = randomNode(10, 20)
+              acc.flatMap(_ => createChildNodeMaskingErrors(service, parentId, nodeId, payload))
+          }
+
+      for {
+        _ <- Future.sequence {
+          parentNodes.map { case (nodeId, payload) =>
+            serviceA.createChildNode(crdtId, treeConfig.rootNodeId, nodeId, payload)
+          }
+        }
+        _ <- Future.sequence(services.map(start))
+        _ <- Future.sequence(services.map(service => batchAdd(service).flatMap(_ => stop(service))))
+      } yield {
+        probes.map(_.expectMsg(Messages.started))
+
+        val values = probes.map(getValue)
+        println(values)
+        values.distinct.size should be (1) // should converge to same value
+      }
+    }
+
+    "converge under concurrent additions to different parents when Zero mapping policy is used" in {
+      convergeConcurrentAdditionsDifferentParents(MappingPolicy.Zero)
+    }
+
+    "converge under concurrent additions to different parents when LastWriteWins mapping policy is used" in {
+      convergeConcurrentAdditionsDifferentParents(MappingPolicy.LastWriteWins)
+    }
+
+    "converge under concurrent additions to different parents when Custom mapping policy is used" in {
+      implicit val resolver = ConflictResolver.instance[Payload]((p1, p2) => p1 < p2)
+      convergeConcurrentAdditionsDifferentParents(MappingPolicy.Custom())
+    }
+
   }
 
   private type Id = String
   private type Payload = String
+
+  private class TestSetup(implicit treeConfig: TreeConfig[Payload, Id]) {
+    val numLocations = 4
+
+    val locationA: Location = location("A", customConfig = customConfig)
+    val locationB: Location = location("B", customConfig = customConfig)
+    val locationC: Location = location("C", customConfig = customConfig)
+    val locationD: Location = location("D", customConfig = customConfig)
+
+    val endpointA: ReplicationEndpoint =
+      locationA.endpoint(
+        Set("L1"),
+        Set(
+          replicationConnection(locationB.port),
+          replicationConnection(locationC.port),
+          replicationConnection(locationD.port)
+        )
+      )
+    val endpointB: ReplicationEndpoint =
+      locationB.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
+    val endpointC: ReplicationEndpoint =
+      locationC.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
+    val endpointD: ReplicationEndpoint =
+      locationD.endpoint(Set("L1"), Set(replicationConnection(locationA.port)))
+
+    val (serviceA, probeA) = service(endpointA, numLocations)
+    val (serviceB, probeB) = service(endpointB, numLocations)
+    val (serviceC, probeC) = service(endpointC, numLocations)
+    val (serviceD, probeD) = service(endpointD, numLocations)
+
+    val services = Seq(serviceA, serviceB, serviceC, serviceD)
+    val probes = Seq(probeA, probeB, probeC, probeD)
+
+    def createChildNodeMaskingErrors(service: TreeCRDTService[Payload, Id],
+                                     parentId: Id,
+                                     nodeId: Id,
+                                     payload: Payload): Future[Unit] =
+      service.createChildNode(crdtId, parentId, nodeId, payload).map(_ => ()).recover { case _ => () }
+
+    def message(service: TreeCRDTService[Payload, Id], message: String): Future[Unit] = {
+      val nodeId = s"$message-${service.serviceId}"
+      createChildNodeMaskingErrors(service, treeConfig.rootNodeId, nodeId, nodeId)
+    }
+
+    def start(service: TreeCRDTService[Payload, Id]): Future[Unit] =
+      message(service, Messages.start)
+    def stop(service: TreeCRDTService[Payload, Id]): Future[Unit] =
+      message(service, Messages.stop)
+
+    def getValue(probe: TestProbe): Tree[Payload, Id] =
+      probe.expectMsgClass(classOf[Tree[Payload, Id]])
+  }
 
   private val crdtId = "1"
   private val maxBatchSize = 100
@@ -136,27 +215,8 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
     (s"child$number", s"child$number's payload")
 
   private def randomNode(minId: Int, maxId: Int): (Id, Payload) = {
-    val number = ThreadLocalRandom.current.nextInt(minId, maxId + 1)
+    val number = ThreadLocalRandom.current.nextInt(minId, maxId)
     node(number)
   }
-
-  private def createChildNodeMaskingErrors(service: TreeCRDTService[Payload, Id],
-                                           parentId: Id,
-                                           nodeId: Id,
-                                           payload: Payload): Future[Unit] =
-    service.createChildNode(crdtId, parentId, nodeId, payload).map(_ => ()).recover { case _ => () }
-
-  private def message(service: TreeCRDTService[Payload, Id], message: String): Future[Unit] = {
-    val nodeId = s"$message-${service.serviceId}"
-    createChildNodeMaskingErrors(service, treeConfig.rootNodeId, nodeId, nodeId)
-  }
-
-  private def start(service: TreeCRDTService[Payload, Id]): Future[Unit] =
-    message(service, Messages.start)
-  private def stop(service: TreeCRDTService[Payload, Id]): Future[Unit] =
-    message(service, Messages.stop)
-
-  private def getValue(probe: TestProbe): Tree[Payload, Id] =
-    probe.expectMsgClass(classOf[Tree[Payload, Id]])
 
 }
