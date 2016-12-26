@@ -267,7 +267,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(node1Id, node2Id, payload2, mkServiceInfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
               mkServiceInfo(mkVectorTimestamp(logicalTime = logicalTime))
             )
             .value should be {
@@ -301,7 +301,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(node1Id, node2Id, payload2, mkServiceInfo(emitterId = existingEmitterId))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkServiceInfo(emitterId = emitterId)
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkServiceInfo(emitterId = emitterId)
             )
             .value should be {
             Tree(
@@ -337,7 +337,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             )
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
               mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
             )
             .value should be {
@@ -376,7 +376,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             )
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node2Id, node2Id, payload3),
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
               mkServiceInfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
             )
             .value should be {
@@ -411,7 +411,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(node1Id, node2Id, payload2)
           )(config)
-            .createChildNode(CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkServiceInfo())
+            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkServiceInfo())
             .value should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,

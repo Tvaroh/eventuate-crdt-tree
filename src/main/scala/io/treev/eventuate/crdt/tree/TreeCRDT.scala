@@ -131,7 +131,7 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
       edgesServiceInfo = edgesServiceInfo - edge.nodeId,
       edgesByNodeId = edgesByNodeId - edge.nodeId,
       edgesByParentId = edgesByParentId
-        .updated(edge.parentId, edgesByParentId.get(edge.parentId).map(_ - edge.nodeId).getOrElse(Map.empty))
+        .updated(edge.parentId, edgesByParentId.getOrElse(edge.parentId, Map.empty) - edge.nodeId)
     )
 
   private def resolveConcurrentAddition(existingEdge: Edge[A, Id],
