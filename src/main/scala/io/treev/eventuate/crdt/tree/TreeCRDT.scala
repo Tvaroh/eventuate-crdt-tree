@@ -137,10 +137,8 @@ case class TreeCRDT[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
   private def resolveConcurrentAddition(existingEdge: Edge[A, Id],
                                         edge: Edge[A, Id],
                                         serviceInfo: ServiceInfo): TreeCRDT[A, Id] =
-    if (existingEdge.parentId == edge.parentId && existingEdge.payload == edge.payload) // same node
-      this
-    else
-      applyMappingPolicy(existingEdge, edge, serviceInfo)
+    if (existingEdge == edge) this // same node
+    else applyMappingPolicy(existingEdge, edge, serviceInfo)
 
   private def applyMappingPolicy(existingEdge: Edge[A, Id],
                                  edge: Edge[A, Id],
