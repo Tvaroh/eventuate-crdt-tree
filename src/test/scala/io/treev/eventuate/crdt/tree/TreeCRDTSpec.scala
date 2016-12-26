@@ -578,7 +578,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
                    serviceInfo: ServiceInfo = mkServiceInfo()): (Edge[Payload, Id], ServiceInfo) =
     (Edge(nodeId, parentId, payload), serviceInfo)
 
-  private def node(number: Int): (String, String) =
+  private def node(number: Int): (Id, Payload) =
     (s"child$number", s"child$number's payload")
 
   private def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
