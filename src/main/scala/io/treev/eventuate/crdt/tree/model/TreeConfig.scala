@@ -3,15 +3,15 @@ package io.treev.eventuate.crdt.tree.model
 /** Tree CRDT configuration. */
 case class TreeConfig[A, Id](rootNodeId: Id,
                              rootPayload: A,
-                             policies: Policies[A, Id] = Policies.default[A, Id])
+                             policies: Policies[A] = Policies.default[A])
 
 /** Conflicts resolution policies.
   * @param connectionPolicy concurrent addition/removal conflict resolution policy
   * @param mappingPolicy concurrent addition conflict resolution policy */
-case class Policies[A, Id](connectionPolicy: ConnectionPolicy,
-                           mappingPolicy: MappingPolicy[A])
+case class Policies[A](connectionPolicy: ConnectionPolicy,
+                       mappingPolicy: MappingPolicy[A])
 object Policies {
-  def default[A, Id]: Policies[A, Id] =
+  def default[A]: Policies[A] =
     Policies(ConnectionPolicy.Root, MappingPolicy.LastWriteWins)
 }
 

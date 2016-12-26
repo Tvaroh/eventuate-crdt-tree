@@ -6,9 +6,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import akka.testkit.TestProbe
 import com.rbmhtechnology.eventuate.{MultiLocationSpecLeveldb, ReplicationEndpoint}
 import com.typesafe.config.{Config, ConfigFactory}
-import io.treev.eventuate.crdt.tree.model.{Tree, TreeConfig}
+import io.treev.eventuate.crdt.tree.model.{ConflictResolver, MappingPolicy, Tree, TreeConfig}
 import io.treev.eventuate.crdt.tree.model.op.CreateChildNodeOpPrepared
-import org.scalatest.{AsyncWordSpec, Matchers}
+import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
@@ -17,7 +17,10 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
   import com.rbmhtechnology.eventuate.ReplicationIntegrationSpec.replicationConnection
 
   "A replicated TreeCRDT" must {
-    "converge under concurrent additions to the same parent" in {
+
+    def convergeConcurrentAdditionsSameParent(mappingPolicy: MappingPolicy[Payload]): Future[Assertion] = {
+      implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = mappingPolicy))
+
       val numLocations = 4
 
       val locationA = location("A", customConfig = customConfig)
@@ -36,52 +39,44 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
       val (serviceD, probeD) = service(endpointD, numLocations)
 
       val services = Seq(serviceA, serviceB, serviceC, serviceD)
+      val probes = Seq(probeA, probeB, probeC, probeD)
 
       val (node0Id, _) = node(0)
-
-      def singleAdd(service: TreeCRDTService[Payload, Id], parentId: Id, nodeId: Id, payload: Payload): Future[Unit] =
-        service.createChildNode(crdtId, parentId, nodeId, payload)
-          .map(_ => ())
-          .recover { case _ => () }
-
-      def start(service: TreeCRDTService[Payload, Id]): Future[Unit] = {
-        val message = s"${Messages.start}-${service.serviceId}"
-        singleAdd(service, treeConfig.rootNodeId, message, message)
-      }
 
       def batchAdd(service: TreeCRDTService[Payload, Id]): Future[Unit] =
         (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
           .foldLeft(Future.successful(())) {
             case (acc, _) =>
               val (nodeId, payload) = randomNode(1, 8)
-              acc.flatMap(_ => singleAdd(service, node0Id, nodeId, payload))
-          }
-          .flatMap { _ =>
-            val message = s"${Messages.stop}-${service.serviceId}"
-            singleAdd(service, treeConfig.rootNodeId, message, message)
+              acc.flatMap(_ => createChildNodeMaskingErrors(service, node0Id, nodeId, payload))
           }
 
       for {
         _ <- Future.sequence(services.map(start))
-        _ <- Future.sequence(services.map(batchAdd))
+        _ <- Future.sequence(services.map(service => batchAdd(service).flatMap(_ => stop(service))))
       } yield {
         probeA.expectMsg(Messages.started)
         probeB.expectMsg(Messages.started)
         probeC.expectMsg(Messages.started)
         probeD.expectMsg(Messages.started)
 
-        def getValue(probe: TestProbe): Tree[Payload, Id] = probe.expectMsgClass(classOf[Tree[Payload, Id]])
-
-        val valueA = getValue(probeA)
-        val valueB = getValue(probeB)
-        val valueC = getValue(probeC)
-        val valueD = getValue(probeD)
-
-        valueA should be (valueB)
-        valueA should be (valueC)
-        valueA should be (valueD)
+        probes.map(getValue).distinct.size should be (1) // should converge to same value
       }
     }
+
+    "converge under concurrent additions to the same parent when Zero mapping policy is used" in {
+      convergeConcurrentAdditionsSameParent(MappingPolicy.Zero)
+    }
+
+    "converge under concurrent additions to the same parent when LastWriteWins mapping policy is used" in {
+      convergeConcurrentAdditionsSameParent(MappingPolicy.LastWriteWins)
+    }
+
+    "converge under concurrent additions to the same parent when Custom mapping policy is used" in {
+      implicit val resolver = ConflictResolver.instance[Payload]((p1, p2) => p1 < p2)
+      convergeConcurrentAdditionsSameParent(MappingPolicy.Custom())
+    }
+
   }
 
   private type Id = String
@@ -96,7 +91,7 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
     val started = "started"
   }
 
-  private implicit val treeConfig: TreeConfig[Payload, Id] =
+  private val treeConfig: TreeConfig[Payload, Id] =
     TreeConfig[Payload, Id]("root", "root's payload")
 
   private val customConfig: Config = ConfigFactory.parseString(
@@ -104,7 +99,8 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
       |eventuate.log.replication.retry-delay = 100ms""".stripMargin
   )
 
-  private def service(endpoint: ReplicationEndpoint, numLocations: Int): (TreeCRDTService[Payload, Id], TestProbe) = {
+  private def service(endpoint: ReplicationEndpoint, numLocations: Int)
+                     (implicit treeConfig: TreeConfig[Payload, Id]): (TreeCRDTService[Payload, Id], TestProbe) = {
     implicit val system = endpoint.system
 
     val probe = TestProbe()
@@ -143,5 +139,24 @@ class TreeCRDTChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLoc
     val number = ThreadLocalRandom.current.nextInt(minId, maxId + 1)
     node(number)
   }
+
+  private def createChildNodeMaskingErrors(service: TreeCRDTService[Payload, Id],
+                                           parentId: Id,
+                                           nodeId: Id,
+                                           payload: Payload): Future[Unit] =
+    service.createChildNode(crdtId, parentId, nodeId, payload).map(_ => ()).recover { case _ => () }
+
+  private def message(service: TreeCRDTService[Payload, Id], message: String): Future[Unit] = {
+    val nodeId = s"$message-${service.serviceId}"
+    createChildNodeMaskingErrors(service, treeConfig.rootNodeId, nodeId, nodeId)
+  }
+
+  private def start(service: TreeCRDTService[Payload, Id]): Future[Unit] =
+    message(service, Messages.start)
+  private def stop(service: TreeCRDTService[Payload, Id]): Future[Unit] =
+    message(service, Messages.stop)
+
+  private def getValue(probe: TestProbe): Tree[Payload, Id] =
+    probe.expectMsgClass(classOf[Tree[Payload, Id]])
 
 }
