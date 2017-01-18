@@ -9,7 +9,7 @@ import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.concurrent.Future
 
-class UnorderedTreeServiceSpecLeveldb extends AsyncWordSpec with Matchers with SingleLocationSpecLeveldb {
+class UnorderedTreeServiceISpecLeveldb extends AsyncWordSpec with Matchers with SingleLocationSpecLeveldb {
 
   "UnorderedTreeService" must {
 

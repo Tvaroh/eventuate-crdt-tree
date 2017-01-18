@@ -7,15 +7,15 @@ import akka.testkit.TestProbe
 import com.rbmhtechnology.eventuate.{Location, MultiLocationSpecLeveldb, ReplicationEndpoint}
 import com.typesafe.config.{Config, ConfigFactory}
 import io.treev.eventuate.crdt.tree.TestHelpers._
-import io.treev.eventuate.crdt.tree.model.op._
 import io.treev.eventuate.crdt.tree.model._
+import io.treev.eventuate.crdt.tree.model.op._
 import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
 import scala.util.Random
 
-class UnorderedTreeChaosSpecLeveldb extends AsyncWordSpec with Matchers with MultiLocationSpecLeveldb {
+class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with MultiLocationSpecLeveldb {
   import com.rbmhtechnology.eventuate.ReplicationIntegrationSpec.replicationConnection
 
   "A replicated UnorderedTree" must {
