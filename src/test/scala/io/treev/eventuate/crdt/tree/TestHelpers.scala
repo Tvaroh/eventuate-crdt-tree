@@ -26,10 +26,9 @@ object TestHelpers {
   def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
     VectorTime(Map(processId -> logicalTime))
 
-  def mkEdgeMetainfo(vectorTimestamp: VectorTime = mkVectorTimestamp(),
-                             emitterId: String = "L1",
-                             systemTimestamp: Long = System.currentTimeMillis()): EdgeMetainfo =
-    EdgeMetainfo(vectorTimestamp, emitterId, systemTimestamp)
+  def mkEdgeMetainfo(emitterId: String = "L1",
+                     systemTimestamp: Long = System.currentTimeMillis()): EdgeMetainfo =
+    EdgeMetainfo(emitterId, systemTimestamp)
 
   def node(number: Int): (Id, Payload) =
     (s"child$number", s"child$number's payload")

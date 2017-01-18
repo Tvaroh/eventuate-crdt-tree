@@ -1,7 +1,7 @@
 package io.treev.eventuate.crdt.tree
 
 import com.rbmhtechnology.eventuate.crdt.{CRDTServiceOps, ORSet}
-import com.rbmhtechnology.eventuate.{DurableEvent, Versioned}
+import com.rbmhtechnology.eventuate.{DurableEvent, VectorTime, Versioned}
 import io.treev.eventuate.crdt.tree.model.exception._
 import io.treev.eventuate.crdt.tree.model.internal._
 import io.treev.eventuate.crdt.tree.model.op._
@@ -14,7 +14,7 @@ import scala.util.{Failure, Success, Try}
 /** Unordered tree CRDT. */
 case class UnorderedTree[A, Id](
   edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
-  edgesMetainfo: Map[Id, Map[Edge[A, Id], EdgeMetainfo]] = Map.empty[Id, Map[Edge[A, Id], EdgeMetainfo]]
+  edgesMetainfo: Map[Id, Map[VectorTime, EdgeMetainfo]] = Map.empty[Id, Map[VectorTime, EdgeMetainfo]]
 )(implicit treeConfig: TreeConfig[A, Id]) {
 
   /** Get whole tree value from underlying CRDT. */
@@ -79,14 +79,15 @@ case class UnorderedTree[A, Id](
 
   private[tree]
   def createChildNode(prepared: CreateChildNodeOpPrepared[Id, A],
+                      vectorTimestamp: VectorTime,
                       edgeMetainfo: EdgeMetainfo): UnorderedTree[A, Id] = {
     val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload)
     copy(
-      edges = edges.add(edge, edgeMetainfo.vectorTimestamp),
+      edges = edges.add(edge, vectorTimestamp),
       edgesMetainfo =
         edgesMetainfo.updated(
           prepared.nodeId,
-          edgesMetainfo.getOrElse(prepared.nodeId, Map.empty).updated(edge, edgeMetainfo)
+          edgesMetainfo.getOrElse(prepared.nodeId, Map.empty).updated(vectorTimestamp, edgeMetainfo)
         )
     )
   }
@@ -158,8 +159,6 @@ case class UnorderedTree[A, Id](
           edge1Metainfo.systemTimestamp > edge2Metainfo.systemTimestamp // first happened last
         else
           edge1Metainfo.emitterId < edge2Metainfo.emitterId // use one with lesser (alphabetically) emitter id
-      else if (edge1.vectorTimestamp equiv edge2.vectorTimestamp)
-        edge1Metainfo.emitterId < edge2Metainfo.emitterId // use one with lesser (alphabetically) emitter id
       else
         edge1.vectorTimestamp > edge2.vectorTimestamp || // first happened last
           !(edge1.vectorTimestamp < edge2.vectorTimestamp) // second happened last
@@ -176,7 +175,7 @@ case class UnorderedTree[A, Id](
       edge2
 
   private def getEdgeMetainfo(edge: Versioned[Edge[A, Id]]): EdgeMetainfo =
-    edgesMetainfo.getOrElse(edge.value.nodeId, Map.empty)(edge.value)
+    edgesMetainfo.getOrElse(edge.value.nodeId, Map.empty)(edge.vectorTimestamp)
 
   private def isRoot(nodeId: Id): Boolean =
     nodeId == treeConfig.rootNodeId
@@ -209,7 +208,8 @@ object UnorderedTree {
         case CreateChildNodeOpPrepared(_, _, _) =>
           crdt.createChildNode(
             operation.asInstanceOf[CreateChildNodeOpPrepared[Id, A]],
-            EdgeMetainfo(event.vectorTimestamp, event.emitterId, event.systemTimestamp)
+            event.vectorTimestamp,
+            EdgeMetainfo(event.emitterId, event.systemTimestamp)
           )
         case DeleteSubTreeOpPrepared(_, _, _) =>
           crdt.deleteSubTree(operation.asInstanceOf[DeleteSubTreeOpPrepared[Id]])

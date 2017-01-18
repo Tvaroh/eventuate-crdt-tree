@@ -1,5 +1,6 @@
 package io.treev.eventuate.crdt.tree
 
+import com.rbmhtechnology.eventuate.VectorTime
 import com.rbmhtechnology.eventuate.crdt.ORSet
 import io.treev.eventuate.crdt.tree.TestHelpers._
 import io.treev.eventuate.crdt.tree.model._
@@ -98,7 +99,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
       "add child node to an empty tree" in {
         val (nodeId, payload) = node(1)
         treeCRDT
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkVectorTimestamp(), mkEdgeMetainfo())
           .value.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(nodeId, payload))).normalize)
       }
 
@@ -107,7 +108,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo())
           .value should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -128,7 +129,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo())
           .value.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -149,7 +150,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         ).createChildNode(
-          CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkEdgeMetainfo()
+          CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
         ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -178,7 +179,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         ).createChildNode(
-          CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkEdgeMetainfo()
+          CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo()
         ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -207,7 +208,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(node1Id, node2Id, payload2)
         )(config)
           .createChildNode(
-            CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkEdgeMetainfo()
+            CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
           )
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
@@ -227,7 +228,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(node1Id, node2Id, payload2)
         )(config)
           .createChildNode(
-            CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkEdgeMetainfo()
+            CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
           )
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
@@ -245,11 +246,12 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
+            edge(node1Id, node2Id, payload2, mkVectorTimestamp(logicalTime = existingLogicalTime))
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp(logicalTime = logicalTime))
+              mkVectorTimestamp(logicalTime = logicalTime),
+              mkEdgeMetainfo()
             )
             .value.normalize should be {
               Tree(
@@ -282,11 +284,12 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
                  expectedTree: Tree[Payload, Id]): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
+            edge(node1Id, node2Id, payload2, mkVectorTimestamp(logicalTime = existingLogicalTime))
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp(logicalTime = logicalTime))
+              mkVectorTimestamp(logicalTime = logicalTime),
+              mkEdgeMetainfo()
             )
             .value.normalize should be (expectedTree.normalize)
         }
@@ -314,7 +317,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         )
       }
 
-      "resolve conflict by comparing emitter ids if vector timestamps are equal when LastWriteWins mapping policy is used (same parent)" in {
+      "resolve conflict by comparing emitter ids if vector timestamps are concurrent when LastWriteWins mapping policy is used (same parent)" in {
         val (node1Id, payload1) = node(1)
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
@@ -322,15 +325,15 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
-        val equalVectorTimestamp = mkVectorTimestamp()
+        val systemTimestamp = System.currentTimeMillis()
 
         def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(equalVectorTimestamp, emitterId = existingEmitterId))
+            edge(node1Id, node2Id, payload2, mkVectorTimestamp("P1"), mkEdgeMetainfo(existingEmitterId, systemTimestamp))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkEdgeMetainfo(equalVectorTimestamp, emitterId = emitterId)
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkVectorTimestamp("P2"), mkEdgeMetainfo(emitterId, systemTimestamp)
             )
             .value.normalize should be {
               Tree(
@@ -349,7 +352,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         test(existingEmitterId = "B", emitterId = "A", expectedPayload = payload3) // replace
       }
 
-      "resolve conflict by comparing emitter ids if vector timestamps are equal when LastWriteWins mapping policy is used (different parent)" in {
+      "resolve conflict by comparing emitter ids if vector timestamps are concurrent when LastWriteWins mapping policy is used (different parent)" in {
         val (node1Id, payload1) = node(1)
         val (node2Id, payload2) = node(2)
         val (_, payload3) = node(3)
@@ -357,16 +360,18 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val config: TreeConfig[Payload, Id] =
           treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
+        val systemTimestamp = System.currentTimeMillis()
+
         def test(existingEmitterId: String,
                  emitterId: String,
                  expectedPayload: Payload,
                  expectedTree: Tree[Payload, Id]): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, metainfo = mkEdgeMetainfo(emitterId = existingEmitterId))
+            edge(node1Id, node2Id, payload2, mkVectorTimestamp("P1"), mkEdgeMetainfo(existingEmitterId, systemTimestamp))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkEdgeMetainfo(emitterId = emitterId)
+              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkVectorTimestamp("P2"), mkEdgeMetainfo(emitterId, systemTimestamp)
             )
             .value.normalize should be (expectedTree.normalize)
         }
@@ -407,12 +412,14 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
+              mkVectorTimestamp("P1", 2L),
+              mkEdgeMetainfo(systemTimestamp = existingSystemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
+              mkVectorTimestamp("P2", 2L),
+              mkEdgeMetainfo(systemTimestamp = systemTimestamp)
             )
             .value.normalize should be {
               Tree(
@@ -447,12 +454,14 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
+              mkVectorTimestamp("P1", 2L),
+              mkEdgeMetainfo(systemTimestamp = existingSystemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
+              mkVectorTimestamp("P2", 2L),
+              mkEdgeMetainfo(systemTimestamp = systemTimestamp)
             )
             .value.normalize should be (expectedTree.normalize)
         }
@@ -495,12 +504,14 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
+              mkVectorTimestamp("P1", 2L),
+              mkEdgeMetainfo(existingEmitterId, systemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
+              mkVectorTimestamp("P2", 2L),
+              mkEdgeMetainfo(emitterId, systemTimestamp)
             )
             .value.normalize should be {
               Tree(
@@ -537,12 +548,14 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
+              mkVectorTimestamp("P1", 2L),
+              mkEdgeMetainfo(existingEmitterId, systemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
+              mkVectorTimestamp("P2", 2L),
+              mkEdgeMetainfo(emitterId, systemTimestamp)
             )
             .value.normalize should be (expectedTree.normalize)
         }
@@ -585,7 +598,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(node1Id, node2Id, payload2)
           )(config)
-            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkEdgeMetainfo())
+            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo())
             .value.normalize should be {
               Tree(
                 treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -612,7 +625,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Skip))
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
-          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo())
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
           }
@@ -632,9 +645,9 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2),
-          edge(node1Id, node3Id, payload3, mkEdgeMetainfo(logicalTime3)),
-          edge(node3Id, node4Id, payload4, mkEdgeMetainfo(logicalTime4)),
-          edge(node3Id, node5Id, payload5, mkEdgeMetainfo(logicalTime5))
+          edge(node1Id, node3Id, payload3, logicalTime3),
+          edge(node3Id, node4Id, payload4, logicalTime4),
+          edge(node3Id, node5Id, payload5, logicalTime5)
         ).prepareDeleteSubTree(node3Id) should be {
           Success(Some(
             DeleteSubTreeOpPrepared(
@@ -676,9 +689,9 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val result = treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2),
-          edge(node1Id, node3Id, payload3, mkEdgeMetainfo(logicalTime3)),
-          edge(node3Id, node4Id, payload4, mkEdgeMetainfo(logicalTime4)),
-          edge(node3Id, node5Id, payload5, mkEdgeMetainfo(logicalTime5))
+          edge(node1Id, node3Id, payload3, logicalTime3),
+          edge(node3Id, node4Id, payload4, logicalTime4),
+          edge(node3Id, node5Id, payload5, logicalTime5)
         ).deleteSubTree(
           DeleteSubTreeOpPrepared(
             node3Id,
@@ -704,15 +717,15 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
 
   private def treeCRDT: UnorderedTree[Payload, Id] = UnorderedTree[Payload, Id]
 
-  private def treeCRDT(edges: (Edge[Payload, Id], EdgeMetainfo)*)
+  private def treeCRDT(edges: (Edge[Payload, Id], VectorTime, EdgeMetainfo)*)
                       (implicit treeConfig: TreeConfig[Payload, Id]): UnorderedTree[Payload, Id] = {
     val edgesORSet =
       edges.foldLeft(ORSet[Edge[Payload, Id]]) {
-        case (orSet, (edge, metainfo)) => orSet.add(edge, metainfo.vectorTimestamp)
+        case (orSet, (edge, vectorTimestamp, _)) => orSet.add(edge, vectorTimestamp)
       }
 
     val edgesMetainfo =
-      edges.map({ case (edge, metainfo) => (edge.nodeId, Map(edge -> metainfo)) }).toMap
+      edges.map({ case (edge, vectorTimestamp, metainfo) => (edge.nodeId, Map(vectorTimestamp -> metainfo)) }).toMap
 
     UnorderedTree[Payload, Id](edgesORSet, edgesMetainfo)
   }
@@ -720,7 +733,8 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
   private def edge(parentId: Id,
                    nodeId: Id,
                    payload: Payload,
-                   metainfo: EdgeMetainfo = mkEdgeMetainfo()): (Edge[Payload, Id], EdgeMetainfo) =
-    (Edge(nodeId, parentId, payload), metainfo)
+                   vectorTimestamp: VectorTime = mkVectorTimestamp(),
+                   metainfo: EdgeMetainfo = mkEdgeMetainfo()): (Edge[Payload, Id], VectorTime, EdgeMetainfo) =
+    (Edge(nodeId, parentId, payload), vectorTimestamp, metainfo)
 
 }
