@@ -3,16 +3,16 @@ package io.treev.eventuate.crdt.tree.model
 /** Tree CRDT configuration. */
 case class TreeConfig[A, Id](rootNodeId: Id,
                              rootPayload: A,
-                             policies: Policies[A] = Policies.default[A])
+                             policies: Policies[A, Id] = Policies.default[A, Id])
 
 /** Conflicts resolution policies.
   * @param connectionPolicy concurrent addition/removal conflict resolution policy
   * @param mappingPolicy concurrent addition conflict resolution policy */
-case class Policies[A](connectionPolicy: ConnectionPolicy,
-                       mappingPolicy: MappingPolicy[A])
+case class Policies[A, Id](connectionPolicy: ConnectionPolicy,
+                           mappingPolicy: MappingPolicy[A, Id])
 object Policies {
-  def default[A]: Policies[A] =
-    Policies(ConnectionPolicy.Root, MappingPolicy.LastWriteWins)
+  def default[A, Id]: Policies[A, Id] =
+    Policies(ConnectionPolicy.Skip, MappingPolicy.LastWriteWins[A, Id]())
 }
 
 /** Concurrent addition/removal conflict resolution policy. */
@@ -22,41 +22,35 @@ object ConnectionPolicy {
   /** Drop orphan node. */
   case object Skip extends ConnectionPolicy
 
-  /** Put orphan node under tree root. */
-  case object Root extends ConnectionPolicy
-
 }
 
 /** Concurrent addition conflict resolution policy. */
-sealed trait MappingPolicy[+A]
+sealed trait MappingPolicy[A, Id]
 object MappingPolicy {
 
   /** Remove both conflicted nodes. */
-  case object Zero extends MappingPolicy[Nothing]
+  case class Zero[A, Id]() extends MappingPolicy[A, Id]
 
   /** Use "last write wins" conflict resolution policy. */
-  case object LastWriteWins extends MappingPolicy[Nothing]
+  case class LastWriteWins[A, Id]() extends MappingPolicy[A, Id]
 
   /** Resolve conflict using user-defined `ConflictResolver` typeclass.
     * @tparam A payload type */
-  case class Custom[A : ConflictResolver]() extends MappingPolicy[A] {
-    val resolver: ConflictResolver[A] = implicitly
-  }
+  case class Custom[A, Id](resolver: ConflictResolver[A, Id]) extends MappingPolicy[A, Id]
 
 }
 
 /** Typeclass used to resolve conflicts using custom logic. */
-trait ConflictResolver[-T] {
+trait ConflictResolver[A, Id] {
 
-  /** Whether `first` argument wins in conflict resolution. */
-  def firstWins(first: T, second: T): Boolean
+  /** Whether first candidate wins in conflict resolution. */
+  def firstWins(firstPayload: A, firstParentId: Id, secondPayload: A, secondParentId: Id): Boolean
 
 }
 object ConflictResolver {
 
-  def apply[A : ConflictResolver]: ConflictResolver[A] = implicitly
-
-  def instance[A](firstWinsF: (A, A) => Boolean): ConflictResolver[A] =
-    (first: A, second: A) => firstWinsF(first, second)
+  def instance[A, Id](firstWinsF: (A, Id, A, Id) => Boolean): ConflictResolver[A, Id] =
+    (firstPayload: A, firstParentId: Id, secondPayload: A, secondParentId: Id) =>
+      firstWinsF(firstPayload, firstParentId, secondPayload, secondParentId)
 
 }

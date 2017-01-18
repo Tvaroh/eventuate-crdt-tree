@@ -2,21 +2,22 @@ package io.treev.eventuate.crdt.tree
 
 import akka.actor.ActorSystem
 import com.rbmhtechnology.eventuate.SingleLocationSpecLeveldb
-import io.treev.eventuate.crdt.tree.model.{Tree, TreeConfig}
-import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, NodeNotExistsException, ParentNodeNotExistsException}
+import io.treev.eventuate.crdt.tree.TestHelpers._
+import io.treev.eventuate.crdt.tree.model._
+import io.treev.eventuate.crdt.tree.model.exception._
 import org.scalatest.{Assertion, AsyncWordSpec, Matchers}
 
 import scala.concurrent.Future
 
-class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with SingleLocationSpecLeveldb {
+class UnorderedTreeServiceSpecLeveldb extends AsyncWordSpec with Matchers with SingleLocationSpecLeveldb {
 
-  "TreeCRDTService" must {
+  "UnorderedTreeService" must {
 
     "value" must {
 
       "return single root element tree on empty tree" in withService { service =>
         service.value(crdtId).map {
-          _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload))
+          _.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload).normalize)
         }
       }
 
@@ -27,7 +28,7 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
       "add child node to an empty tree" in withService { service =>
         val (nodeId, payload) = node(1)
         service.createChildNode(crdtId, treeConfig.rootNodeId, nodeId, payload).map {
-          _ should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(nodeId, payload))))
+          _.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(nodeId, payload))).normalize)
         }
       }
 
@@ -39,18 +40,18 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
           _ <- service.createChildNode(crdtId, treeConfig.rootNodeId, node1Id, payload1)
           tree <- service.createChildNode(crdtId, node1Id, node2Id, payload2)
         } yield {
-          tree should be {
+          tree.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(
                   node1Id, payload1,
-                  Set(
+                  Seq(
                     Tree(node2Id, payload2)
                   )
                 )
               )
-            )
+            ).normalize
           }
         }
       }
@@ -63,14 +64,14 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
           _ <- service.createChildNode(crdtId, treeConfig.rootNodeId, node1Id, payload1)
           tree <- service.createChildNode(crdtId, treeConfig.rootNodeId, node2Id, payload2)
         } yield {
-          tree should be {
+          tree.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(node1Id, payload1),
                 Tree(node2Id, payload2)
               )
-            )
+            ).normalize
           }
         }
       }
@@ -85,19 +86,19 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
           _ <- service.createChildNode(crdtId, node1Id, node2Id, payload2)
           tree <- service.createChildNode(crdtId, node1Id, node3Id, payload3)
         } yield {
-          tree should be {
+          tree.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(
                   node1Id, payload1,
-                  Set(
+                  Seq(
                     Tree(node2Id, payload2),
                     Tree(node3Id, payload3)
                   )
                 )
               )
-            )
+            ).normalize
           }
         }
       }
@@ -139,20 +140,20 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
           _ <- service.createChildNode(crdtId, node2Id, node4Id, payload4)
           tree <- service.deleteSubTree(crdtId, node3Id)
         } yield {
-          tree should be {
+          tree.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(
-                  node1Id, payload1, Set(
+                  node1Id, payload1, Seq(
                     Tree(
                       node2Id, payload2,
-                      Set(Tree(node4Id, payload4))
+                      Seq(Tree(node4Id, payload4))
                     )
                   )
                 )
               )
-            )
+            ).normalize
           }
         }
       }
@@ -172,15 +173,15 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
           _ <- service.createChildNode(crdtId, node4Id, node5Id, payload5)
           tree <- service.deleteSubTree(crdtId, node2Id)
         } yield {
-          tree should be {
+          tree.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(
                   node1Id, payload1
                 )
               )
-            )
+            ).normalize
           }
         }
       }
@@ -196,6 +197,17 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
         }
       }
 
+      "fail with CannotDeleteRootNodeException when deleting root node" in withService { service =>
+        val (node1Id, payload1) = node(1)
+
+        recoverToSucceededIf[CannotDeleteRootNodeException] {
+          for {
+            _ <- service.createChildNode(crdtId, treeConfig.rootNodeId, node1Id, payload1)
+            _ <- service.deleteSubTree(crdtId, treeConfig.rootNodeId)
+          } yield ()
+        }
+      }
+
     }
 
   }
@@ -204,15 +216,12 @@ class TreeCRDTServiceSpecLeveldb extends AsyncWordSpec with Matchers with Single
 
   private val crdtId = "1"
 
-  private implicit val treeConfig: TreeConfig[String, String] =
+  private implicit val treeConfig: TreeConfig[Payload, Id] =
     TreeConfig[String, String]("root", "root's payload")
 
-  private def withService(f: TreeCRDTService[String, String] => Future[Assertion]): Future[Assertion] = {
-    val service = new TreeCRDTService[String, String]("a", log)
+  private def withService(f: UnorderedTreeService[Payload, Id] => Future[Assertion]): Future[Assertion] = {
+    val service = new UnorderedTreeService[Payload, Id]("a", log)
     f(service)
   }
-
-  private def node(number: Int): (String, String) =
-    (s"child$number", s"child$number's payload")
 
 }

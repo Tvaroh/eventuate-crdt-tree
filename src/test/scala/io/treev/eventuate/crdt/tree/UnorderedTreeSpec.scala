@@ -1,24 +1,23 @@
 package io.treev.eventuate.crdt.tree
 
-import com.rbmhtechnology.eventuate.VectorTime
 import com.rbmhtechnology.eventuate.crdt.ORSet
-import io.treev.eventuate.crdt.tree.model.exception.{NodeAlreadyExistsException, NodeNotExistsException, ParentNodeNotExistsException}
-import io.treev.eventuate.crdt.tree.model.internal.{Edge, ServiceInfo}
-import io.treev.eventuate.crdt.tree.model.op.{CreateChildNodeOpPrepared, DeleteSubTreeOpPrepared}
+import io.treev.eventuate.crdt.tree.TestHelpers._
 import io.treev.eventuate.crdt.tree.model._
-import org.scalatest.OptionValues._
+import io.treev.eventuate.crdt.tree.model.exception._
+import io.treev.eventuate.crdt.tree.model.internal._
+import io.treev.eventuate.crdt.tree.model.op._
 import org.scalatest.{Assertion, Matchers, WordSpec}
 
 import scala.util.{Failure, Success}
 
-class TreeCRDTSpec extends WordSpec with Matchers {
+class UnorderedTreeSpec extends WordSpec with Matchers {
 
-  "TreeCRDT" must {
+  "UnorderedTree" must {
 
     "value" must {
 
       "return single root element tree if no nodes were added" in {
-        treeCRDT.value should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload))
+        treeCRDT.value.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload).normalize)
       }
 
       "return tree with all elements" in {
@@ -30,73 +29,20 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(treeConfig.rootNodeId, node2Id, payload2),
           edge(node2Id, node3Id, payload3)
-        ).value should be {
+        ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(node1Id, payload1),
               Tree(
                 node2Id, payload2,
-                Set(
+                Seq(
                   Tree(node3Id, payload3)
                 )
               )
             )
-          )
+          ).normalize
         }
-      }
-
-    }
-
-    "value(nodeId)" must {
-
-      "return sub-tree starting from specified node id" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (node3Id, payload3) = node(3)
-
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1),
-          edge(treeConfig.rootNodeId, node2Id, payload2),
-          edge(node2Id, node3Id, payload3)
-        ).value(node2Id).value should be (Tree(node2Id, payload2, Set(Tree(node3Id, payload3))))
-      }
-
-      "return root tree with all elements if node id is root node id" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (node3Id, payload3) = node(3)
-
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1),
-          edge(treeConfig.rootNodeId, node2Id, payload2),
-          edge(node2Id, node3Id, payload3)
-        ).value(treeConfig.rootNodeId).value should be {
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
-              Tree(node1Id, payload1),
-              Tree(
-                node2Id, payload2,
-                Set(
-                  Tree(node3Id, payload3)
-                )
-              )
-            )
-          )
-        }
-      }
-
-      "return None on missing node id" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (node3Id, payload3) = node(3)
-
-        treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1),
-          edge(treeConfig.rootNodeId, node2Id, payload2),
-          edge(node2Id, node3Id, payload3)
-        ).value("wrong") should be (None)
       }
 
     }
@@ -127,10 +73,21 @@ class TreeCRDTSpec extends WordSpec with Matchers {
       }
 
       "fail with NodeAlreadyExistsException when adding node with same id as root" in {
+        val (node1Id, payload1) = node(1)
+        val (node2Id, payload2) = node(2)
+        treeCRDT(
+          edge(treeConfig.rootNodeId, node1Id, payload1),
+          edge(node1Id, node2Id, payload2)
+        ).prepareCreateChildNode(node1Id, node2Id, payload2) should be {
+          Failure(NodeAlreadyExistsException(node2Id))
+        }
+      }
+
+      "fail with NodeIsParentOfItselfException when adding node with equal id and parent id" in {
         val (nodeId, payload) = node(1)
         treeCRDT(edge(treeConfig.rootNodeId, nodeId, payload))
           .prepareCreateChildNode(treeConfig.rootNodeId, treeConfig.rootNodeId, payload) should be {
-          Failure(NodeAlreadyExistsException(treeConfig.rootNodeId))
+          Failure(NodeIsParentOfItselfException(treeConfig.rootNodeId))
         }
       }
 
@@ -141,8 +98,8 @@ class TreeCRDTSpec extends WordSpec with Matchers {
       "add child node to an empty tree" in {
         val (nodeId, payload) = node(1)
         treeCRDT
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkServiceInfo())
-          .value should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(nodeId, payload))))
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkEdgeMetainfo())
+          .value.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(nodeId, payload))).normalize)
       }
 
       "add child node to a single child tree" in {
@@ -150,19 +107,19 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkServiceInfo())
+          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkEdgeMetainfo())
           .value should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
+              Seq(
                 Tree(
                   node1Id, payload1,
-                  Set(
+                  Seq(
                     Tree(node2Id, payload2)
                   )
                 )
               )
-            )
+            ).normalize
           }
       }
 
@@ -171,16 +128,16 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkServiceInfo())
-          .value should be {
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
-              Tree(node1Id, payload1),
-              Tree(node2Id, payload2)
-            )
-          )
-        }
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkEdgeMetainfo())
+          .value.normalize should be {
+            Tree(
+              treeConfig.rootNodeId, treeConfig.rootPayload,
+              Seq(
+                Tree(node1Id, payload1),
+                Tree(node2Id, payload2)
+              )
+            ).normalize
+          }
       }
 
       "add child node to a root's child node that already has a child" in {
@@ -191,24 +148,25 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
-        ).createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
-          .value should be {
+        ).createChildNode(
+          CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkEdgeMetainfo()
+        ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(
+                Seq(
                   Tree(
                     node2Id, payload2,
-                    Set(
+                    Seq(
                       Tree(node3Id, payload3)
                     )
                   )
                 )
               )
             )
-          )
+          ).normalize
         }
       }
 
@@ -219,19 +177,20 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
-        ).createChildNode(CreateChildNodeOpPrepared(node2Id, node2Id, payload2), mkServiceInfo())
-          .value should be {
+        ).createChildNode(
+          CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkEdgeMetainfo()
+        ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(
+                Seq(
                   Tree(node2Id, payload2)
                 )
               )
             )
-          )
+          ).normalize
         }
       }
 
@@ -241,16 +200,18 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero[Payload, Id]()))
 
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         )(config)
-          .createChildNode(CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkServiceInfo())
-          .value should be {
-          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1)))
-        }
+          .createChildNode(
+            CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkEdgeMetainfo()
+          )
+          .value.normalize should be {
+            Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
+          }
       }
 
       "remove node if same node is added concurrently when Zero mapping policy is used (different parent)" in {
@@ -259,16 +220,18 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Zero[Payload, Id]()))
 
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         )(config)
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkServiceInfo())
-          .value should be {
-          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1)))
-        }
+          .createChildNode(
+            CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkEdgeMetainfo()
+          )
+          .value.normalize should be {
+            Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
+          }
       }
 
       "resolve conflict by comparing vector timestamps when LastWriteWins mapping policy is used (same parent)" in {
@@ -277,28 +240,28 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkServiceInfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
+            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkServiceInfo(mkVectorTimestamp(logicalTime = logicalTime))
+              mkEdgeMetainfo(mkVectorTimestamp(logicalTime = logicalTime))
             )
-            .value should be {
-            Tree(
-              treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
-                Tree(
-                  node1Id, payload1,
-                  Set(Tree(node2Id, expectedPayload))
+            .value.normalize should be {
+              Tree(
+                treeConfig.rootNodeId, treeConfig.rootPayload,
+                Seq(
+                  Tree(
+                    node1Id, payload1,
+                    Seq(Tree(node2Id, expectedPayload))
+                  )
                 )
-              )
-            )
-          }
+              ).normalize
+            }
         }
 
         test(existingLogicalTime = 2, logicalTime = 1, expectedPayload = payload2) // keep
@@ -311,7 +274,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         def test(existingLogicalTime: Long,
                  logicalTime: Long,
@@ -319,23 +282,23 @@ class TreeCRDTSpec extends WordSpec with Matchers {
                  expectedTree: Tree[Payload, Id]): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkServiceInfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
+            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(mkVectorTimestamp(logicalTime = existingLogicalTime)))
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkServiceInfo(mkVectorTimestamp(logicalTime = logicalTime))
+              mkEdgeMetainfo(mkVectorTimestamp(logicalTime = logicalTime))
             )
-            .value should be (expectedTree)
+            .value.normalize should be (expectedTree.normalize)
         }
 
         test( // keep
           existingLogicalTime = 2, logicalTime = 1, expectedPayload = payload2,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(Tree(node2Id, payload2))
+                Seq(Tree(node2Id, payload2))
               )
             )
           )
@@ -344,7 +307,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           existingLogicalTime = 1, logicalTime = 2, expectedPayload = payload3,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(node1Id, payload1), Tree(node2Id, payload3)
             )
           )
@@ -357,27 +320,29 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
+
+        val equalVectorTimestamp = mkVectorTimestamp()
 
         def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkServiceInfo(emitterId = existingEmitterId))
+            edge(node1Id, node2Id, payload2, mkEdgeMetainfo(equalVectorTimestamp, emitterId = existingEmitterId))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkServiceInfo(emitterId = emitterId)
+              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkEdgeMetainfo(equalVectorTimestamp, emitterId = emitterId)
             )
-            .value should be {
-            Tree(
-              treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
-                Tree(
-                  node1Id, payload1,
-                  Set(Tree(node2Id, expectedPayload))
+            .value.normalize should be {
+              Tree(
+                treeConfig.rootNodeId, treeConfig.rootPayload,
+                Seq(
+                  Tree(
+                    node1Id, payload1,
+                    Seq(Tree(node2Id, expectedPayload))
+                  )
                 )
-              )
-            )
-          }
+              ).normalize
+            }
         }
 
         test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
@@ -390,7 +355,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         def test(existingEmitterId: String,
                  emitterId: String,
@@ -398,22 +363,22 @@ class TreeCRDTSpec extends WordSpec with Matchers {
                  expectedTree: Tree[Payload, Id]): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkServiceInfo(emitterId = existingEmitterId))
+            edge(node1Id, node2Id, payload2, metainfo = mkEdgeMetainfo(emitterId = existingEmitterId))
           )(config)
             .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkServiceInfo(emitterId = emitterId)
+              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkEdgeMetainfo(emitterId = emitterId)
             )
-            .value should be (expectedTree)
+            .value.normalize should be (expectedTree.normalize)
         }
 
         test( // keep
           existingEmitterId = "A", emitterId = "B", expectedPayload = payload2,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(Tree(node2Id, payload2))
+                Seq(Tree(node2Id, payload2))
               )
             )
           )
@@ -422,7 +387,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           existingEmitterId = "B", emitterId = "A", expectedPayload = payload3,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(node1Id, payload1), Tree(node2Id, payload3)
             )
           )
@@ -435,31 +400,31 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         def test(existingSystemTimestamp: Long, systemTimestamp: Long, expectedPayload: Payload): Assertion = {
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
             )
-            .value should be {
-            Tree(
-              treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
-                Tree(
-                  node1Id, payload1,
-                  Set(Tree(node2Id, expectedPayload))
+            .value.normalize should be {
+              Tree(
+                treeConfig.rootNodeId, treeConfig.rootPayload,
+                Seq(
+                  Tree(
+                    node1Id, payload1,
+                    Seq(Tree(node2Id, expectedPayload))
+                  )
                 )
-              )
-            )
-          }
+              ).normalize
+            }
         }
 
         test(existingSystemTimestamp = 1000L, systemTimestamp = 999L, expectedPayload = payload2) // keep
@@ -472,7 +437,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         def test(existingSystemTimestamp: Long,
                  systemTimestamp: Long,
@@ -482,24 +447,24 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), systemTimestamp = existingSystemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkServiceInfo(vectorTimestamp = mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), systemTimestamp = systemTimestamp)
             )
-            .value should be (expectedTree)
+            .value.normalize should be (expectedTree.normalize)
         }
 
         test( // keep
           existingSystemTimestamp = 1000L, systemTimestamp = 999L, expectedPayload = payload2,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(Tree(node2Id, payload2))
+                Seq(Tree(node2Id, payload2))
               )
             )
           )
@@ -508,7 +473,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           existingSystemTimestamp = 999L, systemTimestamp = 1000L, expectedPayload = payload3,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(node1Id, payload1), Tree(node2Id, payload3)
             )
           )
@@ -521,7 +486,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         val systemTimestamp = System.currentTimeMillis()
 
@@ -530,24 +495,24 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkServiceInfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkServiceInfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
             )
-            .value should be {
-            Tree(
-              treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
-                Tree(
-                  node1Id, payload1,
-                  Set(Tree(node2Id, expectedPayload))
+            .value.normalize should be {
+              Tree(
+                treeConfig.rootNodeId, treeConfig.rootPayload,
+                Seq(
+                  Tree(
+                    node1Id, payload1,
+                    Seq(Tree(node2Id, expectedPayload))
+                  )
                 )
-              )
-            )
-          }
+              ).normalize
+            }
         }
 
         test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
@@ -560,7 +525,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins))
+          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
 
         val systemTimestamp = System.currentTimeMillis()
 
@@ -572,24 +537,24 @@ class TreeCRDTSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(
               node1Id, node2Id, payload2,
-              mkServiceInfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P1", 2L), existingEmitterId, systemTimestamp)
             )
           )(config)
             .createChildNode(
               CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkServiceInfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
+              mkEdgeMetainfo(mkVectorTimestamp("P2", 2L), emitterId, systemTimestamp)
             )
-            .value should be (expectedTree)
+            .value.normalize should be (expectedTree.normalize)
         }
 
         test( // keep
           existingEmitterId = "A", emitterId = "B", expectedPayload = payload2,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(
                 node1Id, payload1,
-                Set(Tree(node2Id, payload2))
+                Seq(Tree(node2Id, payload2))
               )
             )
           )
@@ -598,7 +563,7 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           existingEmitterId = "B", emitterId = "A", expectedPayload = payload3,
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(
+            Seq(
               Tree(node1Id, payload1), Tree(node2Id, payload3)
             )
           )
@@ -611,27 +576,27 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val (_, payload3) = node(3)
 
         def test(expectedPayload: Payload): Assertion = {
-          implicit val resolver = ConflictResolver.instance[Payload]((p1, _) => p1 == expectedPayload)
-
           val config: TreeConfig[Payload, Id] =
-            treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Custom()))
+            treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.Custom {
+              (payload1, _, _, _) => payload1 == expectedPayload
+            }))
 
           treeCRDT(
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(node1Id, node2Id, payload2)
           )(config)
-            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkServiceInfo())
-            .value should be {
-            Tree(
-              treeConfig.rootNodeId, treeConfig.rootPayload,
-              Set(
-                Tree(
-                  node1Id, payload1,
-                  Set(Tree(node2Id, expectedPayload))
+            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkEdgeMetainfo())
+            .value.normalize should be {
+              Tree(
+                treeConfig.rootNodeId, treeConfig.rootPayload,
+                Seq(
+                  Tree(
+                    node1Id, payload1,
+                    Seq(Tree(node2Id, expectedPayload))
+                  )
                 )
-              )
-            )
-          }
+              ).normalize
+            }
         }
 
         test(expectedPayload = payload2) // keep
@@ -647,25 +612,10 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Skip))
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
-          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
-          .value should be {
-          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1)))
-        }
-      }
-
-      "put node under root if parent node is deleted concurrently when Root connection policy is used" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, _) = node(2)
-        val (node3Id, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Root))
-
-        treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
-          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkServiceInfo())
-          .value should be {
-          Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Set(Tree(node1Id, payload1), Tree(node3Id, payload3)))
-        }
+          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkEdgeMetainfo())
+          .value.normalize should be {
+            Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
+          }
       }
 
     }
@@ -682,13 +632,13 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2),
-          edge(node1Id, node3Id, payload3, mkServiceInfo(logicalTime3)),
-          edge(node3Id, node4Id, payload4, mkServiceInfo(logicalTime4)),
-          edge(node3Id, node5Id, payload5, mkServiceInfo(logicalTime5))
+          edge(node1Id, node3Id, payload3, mkEdgeMetainfo(logicalTime3)),
+          edge(node3Id, node4Id, payload4, mkEdgeMetainfo(logicalTime4)),
+          edge(node3Id, node5Id, payload5, mkEdgeMetainfo(logicalTime5))
         ).prepareDeleteSubTree(node3Id) should be {
           Success(Some(
             DeleteSubTreeOpPrepared(
-              node3Id, node1Id,
+              node3Id,
               Set(node3Id, node4Id, node5Id),
               Set(logicalTime3, logicalTime4, logicalTime5)
             )
@@ -704,14 +654,12 @@ class TreeCRDTSpec extends WordSpec with Matchers {
           .prepareDeleteSubTree(node2Id) should be (Failure(NodeNotExistsException(node2Id)))
       }
 
-      "fail with NodeNotExistsException when deleting root node" in {
+      "fail with CannotDeleteRootNodeException when deleting root node" in {
         val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
 
         treeCRDT(
-          edge(treeConfig.rootNodeId, node1Id, payload1),
-          edge(node1Id, node2Id, payload2)
-        ).prepareDeleteSubTree(treeConfig.rootNodeId) should be (Failure(NodeNotExistsException(treeConfig.rootNodeId)))
+          edge(treeConfig.rootNodeId, node1Id, payload1)
+        ).prepareDeleteSubTree(treeConfig.rootNodeId) should be (Failure(CannotDeleteRootNodeException(treeConfig.rootNodeId)))
       }
 
     }
@@ -728,28 +676,22 @@ class TreeCRDTSpec extends WordSpec with Matchers {
         val result = treeCRDT(
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2),
-          edge(node1Id, node3Id, payload3, mkServiceInfo(logicalTime3)),
-          edge(node3Id, node4Id, payload4, mkServiceInfo(logicalTime4)),
-          edge(node3Id, node5Id, payload5, mkServiceInfo(logicalTime5))
+          edge(node1Id, node3Id, payload3, mkEdgeMetainfo(logicalTime3)),
+          edge(node3Id, node4Id, payload4, mkEdgeMetainfo(logicalTime4)),
+          edge(node3Id, node5Id, payload5, mkEdgeMetainfo(logicalTime5))
         ).deleteSubTree(
           DeleteSubTreeOpPrepared(
-            node3Id, node1Id,
+            node3Id,
             Set(node3Id, node4Id, node5Id),
             Set(logicalTime3, logicalTime4, logicalTime5)
           )
         )
 
-        val deletedNodeIds = Set(node3Id, node4Id, node5Id)
-
-        result.edgesServiceInfo.keys should not contain allElementsOf (deletedNodeIds)
-        result.edgesByNodeId.keys should not contain allElementsOf (deletedNodeIds)
-        result.edgesByParentId.keys should not contain allElementsOf (deletedNodeIds)
-
-        result.value should be {
+        result.value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
-            Set(Tree(node1Id, payload1, Set(Tree(node2Id, payload2))))
-          )
+            Seq(Tree(node1Id, payload1, Seq(Tree(node2Id, payload2))))
+          ).normalize
         }
       }
 
@@ -757,45 +699,28 @@ class TreeCRDTSpec extends WordSpec with Matchers {
 
   }
 
-  private type Id = String
-  private type Payload = String
-
   private implicit val treeConfig: TreeConfig[Payload, Id] =
     TreeConfig[Payload, Id]("root", "root's payload")
 
-  private def treeCRDT: TreeCRDT[Payload, Id] = TreeCRDT[Payload, Id]
+  private def treeCRDT: UnorderedTree[Payload, Id] = UnorderedTree[Payload, Id]
 
-  private def treeCRDT(edges: (Edge[Payload, Id], ServiceInfo)*)
-                      (implicit treeConfig: TreeConfig[Payload, Id]): TreeCRDT[Payload, Id] = {
+  private def treeCRDT(edges: (Edge[Payload, Id], EdgeMetainfo)*)
+                      (implicit treeConfig: TreeConfig[Payload, Id]): UnorderedTree[Payload, Id] = {
     val edgesORSet =
       edges.foldLeft(ORSet[Edge[Payload, Id]]) {
-        case (orSet, (edge, serviceInfo)) => orSet.add(edge, serviceInfo.vectorTimestamp)
+        case (orSet, (edge, metainfo)) => orSet.add(edge, metainfo.vectorTimestamp)
       }
-    val edgesServiceInfo =
-      edges.map({ case (edge, serviceInfo) => (edge.nodeId, serviceInfo) }).toMap
-    val edgesByNodeId =
-      edges.map(_._1).map(edge => (edge.nodeId, edge)).toMap
-    val edgesByParentId =
-      edges.map(_._1).groupBy(_.parentId).mapValues(_.map(edge => (edge.nodeId, edge)).toMap)
 
-    TreeCRDT[Payload, Id](edgesORSet, edgesServiceInfo, edgesByNodeId, edgesByParentId)
+    val edgesMetainfo =
+      edges.map({ case (edge, metainfo) => (edge.nodeId, Map(edge -> metainfo)) }).toMap
+
+    UnorderedTree[Payload, Id](edgesORSet, edgesMetainfo)
   }
 
   private def edge(parentId: Id,
                    nodeId: Id,
                    payload: Payload,
-                   serviceInfo: ServiceInfo = mkServiceInfo()): (Edge[Payload, Id], ServiceInfo) =
-    (Edge(nodeId, parentId, payload), serviceInfo)
-
-  private def node(number: Int): (Id, Payload) =
-    (s"child$number", s"child$number's payload")
-
-  private def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
-    VectorTime(Map(processId -> logicalTime))
-
-  private def mkServiceInfo(vectorTimestamp: VectorTime = mkVectorTimestamp(),
-                            emitterId: String = "L1",
-                            systemTimestamp: Long = System.currentTimeMillis()): ServiceInfo =
-    ServiceInfo(vectorTimestamp, emitterId, systemTimestamp)
+                   metainfo: EdgeMetainfo = mkEdgeMetainfo()): (Edge[Payload, Id], EdgeMetainfo) =
+    (Edge(nodeId, parentId, payload), metainfo)
 
 }

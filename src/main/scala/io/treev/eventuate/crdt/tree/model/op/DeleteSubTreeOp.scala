@@ -5,6 +5,5 @@ import com.rbmhtechnology.eventuate.VectorTime
 case class DeleteSubTreeOp(nodeId: Any)
 
 case class DeleteSubTreeOpPrepared[Id](nodeId: Id,
-                                       parentId: Id,
                                        nodeIds: Set[Id],
                                        timestamps: Set[VectorTime])
