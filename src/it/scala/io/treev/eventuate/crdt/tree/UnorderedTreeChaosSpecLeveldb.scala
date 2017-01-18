@@ -55,9 +55,7 @@ class UnorderedTreeChaosSpecLeveldb extends AsyncWordSpec with Matchers with Mul
     }
 
     "converge under concurrent additions to the same parent when Custom mapping policy is used" in {
-      convergeConcurrentAdditionsSameParent {
-        MappingPolicy.Custom((payload1, parentId1, payload2, parentId2) => payload1 < payload2 || parentId1 < parentId2)
-      }
+      convergeConcurrentAdditionsSameParent(customMappingPolicy)
     }
 
     def convergeConcurrentAdditionsDifferentParents(mappingPolicy: MappingPolicy[Payload, Id]): Future[Assertion] = {
@@ -101,9 +99,7 @@ class UnorderedTreeChaosSpecLeveldb extends AsyncWordSpec with Matchers with Mul
     }
 
     "converge under concurrent additions to different parents when Custom mapping policy is used" in {
-      convergeConcurrentAdditionsDifferentParents(
-        MappingPolicy.Custom((payload1, parentId1, payload2, parentId2) => payload1 < payload2 || parentId1 < parentId2)
-      )
+      convergeConcurrentAdditionsDifferentParents(customMappingPolicy)
     }
 
   }
@@ -206,5 +202,11 @@ class UnorderedTreeChaosSpecLeveldb extends AsyncWordSpec with Matchers with Mul
     val number = ThreadLocalRandom.current.nextInt(minId, maxId)
     node(number)
   }
+
+  private def customMappingPolicy: MappingPolicy[Payload, Id] =
+    MappingPolicy.Custom { (payload1, parentId1, payload2, parentId2) =>
+      if (payload1 != payload2) payload1 < payload2
+      else parentId1 < parentId2
+    }
 
 }
