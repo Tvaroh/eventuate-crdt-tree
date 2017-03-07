@@ -46,8 +46,14 @@ trait ConflictResolver[A, Id] {
 }
 object ConflictResolver {
 
-  def instance[A, Id](firstWinsF: (A, Id, A, Id) => Boolean): ConflictResolver[A, Id] =
-    (firstPayload: A, firstParentId: Id, secondPayload: A, secondParentId: Id) =>
-      firstWinsF(firstPayload, firstParentId, secondPayload, secondParentId)
+  def order[A, Id](reverse: Boolean = false)
+                  (implicit payloadOrdering: Ordering[A],
+                            idOrdering: Ordering[Id]): ConflictResolver[A, Id] =
+    if (!reverse) { (payload1, parentId1, payload2, parentId2) =>
+      if (payload1 != payload2) payloadOrdering.lt(payload1, payload2) else idOrdering.lt(parentId1, parentId2)
+    }
+    else { (payload1, parentId1, payload2, parentId2) =>
+      if (payload1 != payload2) payloadOrdering.gt(payload1, payload2) else idOrdering.gt(parentId1, parentId2)
+    }
 
 }

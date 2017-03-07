@@ -83,15 +83,16 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
     }
 
     "converge under concurrent additions to different parents when Zero mapping policy is used" in {
-      convergeConcurrentAdditionsDifferentParents(MappingPolicy.Zero[Payload, Id]())
+      convergeConcurrentAdditionsDifferentParents(MappingPolicy.Zero())
     }
 
     "converge under concurrent additions to different parents when Custom mapping policy is used" in {
       convergeConcurrentAdditionsDifferentParents(customMappingPolicy)
     }
 
-    def convergeConcurrentAdditionRemoval(connectionPolicy: ConnectionPolicy): Future[Assertion] = {
-      implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = connectionPolicy))
+    def convergeConcurrentAdditionRemoval(connectionPolicy: ConnectionPolicy,
+                                          mappingPolicy: MappingPolicy[Payload, Id]): Future[Assertion] = {
+      implicit val config = treeConfig.copy(policies = Policies(connectionPolicy, mappingPolicy))
       val setup = new TestSetup; import setup._
 
       def batchAddRemove(service: UnorderedTreeService[Payload, Id]): Future[Unit] =
@@ -117,8 +118,12 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       }
     }
 
-    "converge under concurrent addition/deletion when Skip connection policy is used" in {
-      convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip)
+    "converge under concurrent addition/deletion when Skip connection policy and Zero mapping policy are used" in {
+      convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip, MappingPolicy.Zero())
+    }
+
+    "converge under concurrent addition/deletion when Skip connection policy and Custom mapping policy are used" in {
+      convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip, customMappingPolicy)
     }
 
   }
@@ -227,9 +232,6 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
   }
 
   private def customMappingPolicy: MappingPolicy[Payload, Id] =
-    MappingPolicy.Custom { (payload1, parentId1, payload2, parentId2) =>
-      if (payload1 != payload2) payload1 < payload2
-      else parentId1 < parentId2
-    }
+    MappingPolicy.Custom(ConflictResolver.order())
 
 }
