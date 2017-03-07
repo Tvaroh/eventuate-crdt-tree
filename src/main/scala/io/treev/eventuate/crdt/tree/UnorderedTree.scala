@@ -12,9 +12,8 @@ import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
 
 /** Unordered tree CRDT. */
-case class UnorderedTree[A, Id](
-  edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]]
-)(implicit treeConfig: TreeConfig[A, Id]) {
+case class UnorderedTree[A, Id](edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]])
+                               (implicit treeConfig: TreeConfig[A, Id]) {
 
   /** Get whole tree value from underlying CRDT. */
   def value: Tree[A, Id] = {
@@ -78,8 +77,10 @@ case class UnorderedTree[A, Id](
 
   private[tree]
   def createChildNode(prepared: CreateChildNodeOpPrepared[Id, A],
-                      vectorTimestamp: VectorTime): UnorderedTree[A, Id] = {
-    val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload)
+                      vectorTimestamp: VectorTime,
+                      systemTimestamp: Long,
+                      emitterId: String): UnorderedTree[A, Id] = {
+    val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload, systemTimestamp, emitterId)
     copy(edges = edges.add(edge, vectorTimestamp))
   }
 
@@ -132,8 +133,24 @@ case class UnorderedTree[A, Id](
   private def applyMappingPolicy(duplicates: List[Versioned[Edge[A, Id]]]): Option[Versioned[Edge[A, Id]]] =
     treeConfig.policies.mappingPolicy match {
       case MappingPolicy.Zero() => None
+      case MappingPolicy.LastWriteWins() => duplicates.reduceOption(getLastWriteWinner)
       case MappingPolicy.Custom(resolver) => duplicates.reduceOption(getCustomWinner(resolver))
     }
+
+  private def getLastWriteWinner(edge1: Versioned[Edge[A, Id]],
+                                 edge2: Versioned[Edge[A, Id]]): Versioned[Edge[A, Id]] = {
+    val firstWon =
+      if (edge1.vectorTimestamp <-> edge2.vectorTimestamp) // concurrent
+        if (edge1.value.systemTimestamp != edge2.value.systemTimestamp)
+          edge1.value.systemTimestamp > edge2.value.systemTimestamp // first happened last
+        else
+          edge1.value.emitterId < edge2.value.emitterId // use one with lesser (alphabetically) emitter id
+      else
+        edge1.vectorTimestamp > edge2.vectorTimestamp || // first happened last
+          !(edge1.vectorTimestamp < edge2.vectorTimestamp) // second happened last
+
+    if (firstWon) edge1 else edge2
+  }
 
   private def getCustomWinner(resolver: ConflictResolver[A, Id])
                              (edge1: Versioned[Edge[A, Id]],
@@ -174,7 +191,9 @@ object UnorderedTree {
         case CreateChildNodeOpPrepared(_, _, _) =>
           crdt.createChildNode(
             operation.asInstanceOf[CreateChildNodeOpPrepared[Id, A]],
-            event.vectorTimestamp
+            event.vectorTimestamp,
+            event.systemTimestamp,
+            event.emitterId
           )
         case DeleteSubTreeOpPrepared(_, _, _) =>
           crdt.deleteSubTree(operation.asInstanceOf[DeleteSubTreeOpPrepared[Id]])

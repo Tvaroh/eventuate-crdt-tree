@@ -48,6 +48,10 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       convergeConcurrentAdditionsSameParent(MappingPolicy.Zero())
     }
 
+    "converge under concurrent additions to the same parent when LastWriteWins mapping policy is used" in {
+      convergeConcurrentAdditionsSameParent(MappingPolicy.LastWriteWins())
+    }
+
     "converge under concurrent additions to the same parent when Custom mapping policy is used" in {
       convergeConcurrentAdditionsSameParent(customMappingPolicy)
     }
@@ -86,6 +90,10 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       convergeConcurrentAdditionsDifferentParents(MappingPolicy.Zero())
     }
 
+    "converge under concurrent additions to different parents when LastWriteWins mapping policy is used" in {
+      convergeConcurrentAdditionsDifferentParents(MappingPolicy.LastWriteWins())
+    }
+
     "converge under concurrent additions to different parents when Custom mapping policy is used" in {
       convergeConcurrentAdditionsDifferentParents(customMappingPolicy)
     }
@@ -120,6 +128,10 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
 
     "converge under concurrent addition/deletion when Skip connection policy and Zero mapping policy are used" in {
       convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip, MappingPolicy.Zero())
+    }
+
+    "converge under concurrent addition/deletion when Skip connection policy and LastWriteWins mapping policy are used" in {
+      convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip, MappingPolicy.LastWriteWins())
     }
 
     "converge under concurrent addition/deletion when Skip connection policy and Custom mapping policy are used" in {

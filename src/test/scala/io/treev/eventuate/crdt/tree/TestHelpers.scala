@@ -25,6 +25,10 @@ object TestHelpers {
   def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
     VectorTime(Map(processId -> logicalTime))
 
+  def mkEmitterId(): String = "L1"
+
+  def mkSystemTimestamp(): Long = System.currentTimeMillis()
+
   def node(number: Int): (Id, Payload) =
     (s"child$number", s"child$number's payload")
 
