@@ -13,8 +13,7 @@ import scala.util.{Failure, Success, Try}
 
 /** Unordered tree CRDT. */
 case class UnorderedTree[A, Id](
-  edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]],
-  edgesMetainfo: Map[Id, Map[VectorTime, EdgeMetainfo]] = Map.empty[Id, Map[VectorTime, EdgeMetainfo]]
+  edges: ORSet[Edge[A, Id]] = ORSet[Edge[A, Id]]
 )(implicit treeConfig: TreeConfig[A, Id]) {
 
   /** Get whole tree value from underlying CRDT. */
@@ -79,17 +78,9 @@ case class UnorderedTree[A, Id](
 
   private[tree]
   def createChildNode(prepared: CreateChildNodeOpPrepared[Id, A],
-                      vectorTimestamp: VectorTime,
-                      edgeMetainfo: EdgeMetainfo): UnorderedTree[A, Id] = {
+                      vectorTimestamp: VectorTime): UnorderedTree[A, Id] = {
     val edge = Edge(prepared.nodeId, prepared.parentId, prepared.payload)
-    copy(
-      edges = edges.add(edge, vectorTimestamp),
-      edgesMetainfo =
-        edgesMetainfo.updated(
-          prepared.nodeId,
-          edgesMetainfo.getOrElse(prepared.nodeId, Map.empty).updated(vectorTimestamp, edgeMetainfo)
-        )
-    )
+    copy(edges = edges.add(edge, vectorTimestamp))
   }
 
   private[tree]
@@ -121,10 +112,7 @@ case class UnorderedTree[A, Id](
 
   private[tree]
   def deleteSubTree(prepared: DeleteSubTreeOpPrepared[Id]): UnorderedTree[A, Id] =
-    copy(
-      edges = edges.remove(prepared.timestamps),
-      edgesMetainfo = edgesMetainfo -- prepared.nodeIds
-    )
+    copy(edges = edges.remove(prepared.timestamps))
 
   private def buildLookups(
     edges: ORSet[Edge[A, Id]]
@@ -144,27 +132,8 @@ case class UnorderedTree[A, Id](
   private def applyMappingPolicy(duplicates: List[Versioned[Edge[A, Id]]]): Option[Versioned[Edge[A, Id]]] =
     treeConfig.policies.mappingPolicy match {
       case MappingPolicy.Zero() => None
-      case MappingPolicy.LastWriteWins() => duplicates.reduceOption(getLastWriteWinner)
       case MappingPolicy.Custom(resolver) => duplicates.reduceOption(getCustomWinner(resolver))
     }
-
-  private def getLastWriteWinner(edge1: Versioned[Edge[A, Id]],
-                                 edge2: Versioned[Edge[A, Id]]): Versioned[Edge[A, Id]] = {
-    val edge1Metainfo = getEdgeMetainfo(edge1)
-    val edge2Metainfo = getEdgeMetainfo(edge2)
-
-    val firstWon =
-      if (edge1.vectorTimestamp <-> edge2.vectorTimestamp) // concurrent
-        if (edge1Metainfo.systemTimestamp != edge2Metainfo.systemTimestamp)
-          edge1Metainfo.systemTimestamp > edge2Metainfo.systemTimestamp // first happened last
-        else
-          edge1Metainfo.emitterId < edge2Metainfo.emitterId // use one with lesser (alphabetically) emitter id
-      else
-        edge1.vectorTimestamp > edge2.vectorTimestamp || // first happened last
-          !(edge1.vectorTimestamp < edge2.vectorTimestamp) // second happened last
-
-    if (firstWon) edge1 else edge2
-  }
 
   private def getCustomWinner(resolver: ConflictResolver[A, Id])
                              (edge1: Versioned[Edge[A, Id]],
@@ -173,9 +142,6 @@ case class UnorderedTree[A, Id](
       edge1
     else
       edge2
-
-  private def getEdgeMetainfo(edge: Versioned[Edge[A, Id]]): EdgeMetainfo =
-    edgesMetainfo.getOrElse(edge.value.nodeId, Map.empty)(edge.vectorTimestamp)
 
   private def isRoot(nodeId: Id): Boolean =
     nodeId == treeConfig.rootNodeId
@@ -208,8 +174,7 @@ object UnorderedTree {
         case CreateChildNodeOpPrepared(_, _, _) =>
           crdt.createChildNode(
             operation.asInstanceOf[CreateChildNodeOpPrepared[Id, A]],
-            event.vectorTimestamp,
-            EdgeMetainfo(event.emitterId, event.systemTimestamp)
+            event.vectorTimestamp
           )
         case DeleteSubTreeOpPrepared(_, _, _) =>
           crdt.deleteSubTree(operation.asInstanceOf[DeleteSubTreeOpPrepared[Id]])

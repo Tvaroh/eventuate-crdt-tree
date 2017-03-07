@@ -2,7 +2,6 @@ package io.treev.eventuate.crdt.tree
 
 import com.rbmhtechnology.eventuate.VectorTime
 import io.treev.eventuate.crdt.tree.model.Tree
-import io.treev.eventuate.crdt.tree.model.internal._
 
 object TestHelpers {
 
@@ -25,10 +24,6 @@ object TestHelpers {
 
   def mkVectorTimestamp(processId: String = "P1", logicalTime: Long = 1): VectorTime =
     VectorTime(Map(processId -> logicalTime))
-
-  def mkEdgeMetainfo(emitterId: String = "L1",
-                     systemTimestamp: Long = System.currentTimeMillis()): EdgeMetainfo =
-    EdgeMetainfo(emitterId, systemTimestamp)
 
   def node(number: Int): (Id, Payload) =
     (s"child$number", s"child$number's payload")

@@ -24,15 +24,13 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = mappingPolicy))
       val setup = new TestSetup; import setup._
 
-      val (parentId, parentPayload) = node(1)
+      val (parentId, parentPayload) = node(0)
 
       def batchAdd(service: UnorderedTreeService[Payload, Id]): Future[Unit] =
-        (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
-          .foldLeft(Future.successful(())) {
-            case (acc, _) =>
-              val (nodeId, payload) = randomNode(10, 20)
-              acc.flatMap(_ => createChildNodeMaskingErrors(service, parentId, nodeId, payload))
-          }
+        batch(service) { service =>
+          val (nodeId, payload) = randomNode(10, 20)
+          maskErrors(service.createChildNode(crdtId, parentId, nodeId, payload))
+        }
 
       for {
         _ <- serviceA.createChildNode(crdtId, treeConfig.rootNodeId, parentId, parentPayload)
@@ -50,10 +48,6 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       convergeConcurrentAdditionsSameParent(MappingPolicy.Zero())
     }
 
-    "converge under concurrent additions to the same parent when LastWriteWins mapping policy is used" in {
-      convergeConcurrentAdditionsSameParent(MappingPolicy.LastWriteWins())
-    }
-
     "converge under concurrent additions to the same parent when Custom mapping policy is used" in {
       convergeConcurrentAdditionsSameParent(customMappingPolicy)
     }
@@ -66,13 +60,11 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       val parentNodes = parentNumbers.map(node)
 
       def batchAdd(service: UnorderedTreeService[Payload, Id]): Future[Unit] =
-        (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
-          .foldLeft(Future.successful(())) {
-            case (acc, _) =>
-              val parentId = parentNodes(Random.nextInt(parentNodes.size))._1
-              val (nodeId, payload) = randomNode(10, 20)
-              acc.flatMap(_ => createChildNodeMaskingErrors(service, parentId, nodeId, payload))
-          }
+        batch(service) { service =>
+          val parentId = parentNodes(Random.nextInt(parentNodes.size))._1
+          val (nodeId, payload) = randomNode(10, 20)
+          maskErrors(service.createChildNode(crdtId, parentId, nodeId, payload))
+        }
 
       for {
         _ <- Future.sequence {
@@ -94,12 +86,39 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
       convergeConcurrentAdditionsDifferentParents(MappingPolicy.Zero[Payload, Id]())
     }
 
-    "converge under concurrent additions to different parents when LastWriteWins mapping policy is used" in {
-      convergeConcurrentAdditionsDifferentParents(MappingPolicy.LastWriteWins())
-    }
-
     "converge under concurrent additions to different parents when Custom mapping policy is used" in {
       convergeConcurrentAdditionsDifferentParents(customMappingPolicy)
+    }
+
+    def convergeConcurrentAdditionRemoval(connectionPolicy: ConnectionPolicy): Future[Assertion] = {
+      implicit val config = treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = connectionPolicy))
+      val setup = new TestSetup; import setup._
+
+      def batchAddRemove(service: UnorderedTreeService[Payload, Id]): Future[Unit] =
+        batch(service) { service =>
+          val (parentId, parentPayload) = node(0)
+          val (nodeId, payload) = randomNode(1, 3)
+
+          for {
+            _ <- maskErrors(service.createChildNode(crdtId, treeConfig.rootNodeId, parentId, parentPayload))
+            _ <- maskErrors(service.createChildNode(crdtId, parentId, nodeId, payload))
+            _ <- maskErrors(service.deleteSubTree(crdtId, parentId))
+          } yield ()
+        }
+
+      for {
+        _ <- Future.sequence(services.map(start))
+        _ <- Future.sequence(services.map(service => batchAddRemove(service).flatMap(_ => stop(service))))
+      } yield {
+        probes.map(_.expectMsg(Messages.started))
+
+        val values = probes.map(getValue)
+        values.map(_.normalize).distinct.size should be (1) // should converge to same value
+      }
+    }
+
+    "converge under concurrent addition/deletion when Skip connection policy is used" in {
+      convergeConcurrentAdditionRemoval(ConnectionPolicy.Skip)
     }
 
   }
@@ -128,15 +147,19 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
     val services = Seq(serviceA, serviceB, serviceC, serviceD)
     val probes = Seq(probeA, probeB, probeC, probeD)
 
-    def createChildNodeMaskingErrors(service: UnorderedTreeService[Payload, Id],
-                                     parentId: Id,
-                                     nodeId: Id,
-                                     payload: Payload): Future[Unit] =
-      service.createChildNode(crdtId, parentId, nodeId, payload).map(_ => ()).recover { case _ => () }
+    def maskErrors[T](f: Future[T]): Future[Unit] =
+      f.map(_ => ()).recover { case _ => () }
+
+    def batch(service: UnorderedTreeService[Payload, Id])
+             (op: => UnorderedTreeService[Payload, Id] => Future[Unit]): Future[Unit] =
+      (1 to ThreadLocalRandom.current.nextInt(maxBatchSize / 2, maxBatchSize))
+        .foldLeft(Future.successful(())) {
+          case (acc, _) => acc.flatMap(_ => op(service))
+        }
 
     def message(service: UnorderedTreeService[Payload, Id], message: String): Future[Unit] = {
       val nodeId = s"$message-${service.serviceId}"
-      createChildNodeMaskingErrors(service, treeConfig.rootNodeId, nodeId, nodeId)
+      maskErrors(service.createChildNode(crdtId, treeConfig.rootNodeId, nodeId, nodeId))
     }
 
     def start(service: UnorderedTreeService[Payload, Id]): Future[Unit] =
@@ -199,7 +222,7 @@ class UnorderedTreeChaosISpecLeveldb extends AsyncWordSpec with Matchers with Mu
   }
 
   private def randomNode(minId: Int, maxId: Int): (Id, Payload) = {
-    val number = ThreadLocalRandom.current.nextInt(minId, maxId)
+    val number = ThreadLocalRandom.current.nextInt(minId, maxId + 1)
     node(number)
   }
 

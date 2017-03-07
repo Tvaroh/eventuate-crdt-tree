@@ -99,7 +99,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
       "add child node to an empty tree" in {
         val (nodeId, payload) = node(1)
         treeCRDT
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkVectorTimestamp(), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, nodeId, payload), mkVectorTimestamp())
           .value.normalize should be (Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(nodeId, payload))).normalize)
       }
 
@@ -108,7 +108,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp())
           .value should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -129,7 +129,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
         val (node2Id, payload2) = node(2)
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))
-          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload2), mkVectorTimestamp())
           .value.normalize should be {
             Tree(
               treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -150,7 +150,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         ).createChildNode(
-          CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
+          CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp()
         ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -179,7 +179,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(treeConfig.rootNodeId, node1Id, payload1),
           edge(node1Id, node2Id, payload2)
         ).createChildNode(
-          CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp(), mkEdgeMetainfo()
+          CreateChildNodeOpPrepared(node1Id, node2Id, payload2), mkVectorTimestamp()
         ).value.normalize should be {
           Tree(
             treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -208,7 +208,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(node1Id, node2Id, payload2)
         )(config)
           .createChildNode(
-            CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
+            CreateChildNodeOpPrepared(node2Id, node2Id, payload3), mkVectorTimestamp()
           )
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
@@ -228,359 +228,11 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           edge(node1Id, node2Id, payload2)
         )(config)
           .createChildNode(
-            CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo()
+            CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkVectorTimestamp()
           )
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
           }
-      }
-
-      "resolve conflict by comparing vector timestamps when LastWriteWins mapping policy is used (same parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        def test(existingLogicalTime: Long, logicalTime: Long, expectedPayload: Payload): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkVectorTimestamp(logicalTime = existingLogicalTime))
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkVectorTimestamp(logicalTime = logicalTime),
-              mkEdgeMetainfo()
-            )
-            .value.normalize should be {
-              Tree(
-                treeConfig.rootNodeId, treeConfig.rootPayload,
-                Seq(
-                  Tree(
-                    node1Id, payload1,
-                    Seq(Tree(node2Id, expectedPayload))
-                  )
-                )
-              ).normalize
-            }
-        }
-
-        test(existingLogicalTime = 2, logicalTime = 1, expectedPayload = payload2) // keep
-        test(existingLogicalTime = 1, logicalTime = 2, expectedPayload = payload3) // replace
-      }
-
-      "resolve conflict by comparing vector timestamps when LastWriteWins mapping policy is used (different parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        def test(existingLogicalTime: Long,
-                 logicalTime: Long,
-                 expectedPayload: Payload,
-                 expectedTree: Tree[Payload, Id]): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkVectorTimestamp(logicalTime = existingLogicalTime))
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkVectorTimestamp(logicalTime = logicalTime),
-              mkEdgeMetainfo()
-            )
-            .value.normalize should be (expectedTree.normalize)
-        }
-
-        test( // keep
-          existingLogicalTime = 2, logicalTime = 1, expectedPayload = payload2,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(
-                node1Id, payload1,
-                Seq(Tree(node2Id, payload2))
-              )
-            )
-          )
-        )
-        test( // move
-          existingLogicalTime = 1, logicalTime = 2, expectedPayload = payload3,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(node1Id, payload1), Tree(node2Id, payload3)
-            )
-          )
-        )
-      }
-
-      "resolve conflict by comparing emitter ids if vector timestamps are concurrent when LastWriteWins mapping policy is used (same parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        val systemTimestamp = System.currentTimeMillis()
-
-        def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkVectorTimestamp("P1"), mkEdgeMetainfo(existingEmitterId, systemTimestamp))
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkVectorTimestamp("P2"), mkEdgeMetainfo(emitterId, systemTimestamp)
-            )
-            .value.normalize should be {
-              Tree(
-                treeConfig.rootNodeId, treeConfig.rootPayload,
-                Seq(
-                  Tree(
-                    node1Id, payload1,
-                    Seq(Tree(node2Id, expectedPayload))
-                  )
-                )
-              ).normalize
-            }
-        }
-
-        test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
-        test(existingEmitterId = "B", emitterId = "A", expectedPayload = payload3) // replace
-      }
-
-      "resolve conflict by comparing emitter ids if vector timestamps are concurrent when LastWriteWins mapping policy is used (different parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        val systemTimestamp = System.currentTimeMillis()
-
-        def test(existingEmitterId: String,
-                 emitterId: String,
-                 expectedPayload: Payload,
-                 expectedTree: Tree[Payload, Id]): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(node1Id, node2Id, payload2, mkVectorTimestamp("P1"), mkEdgeMetainfo(existingEmitterId, systemTimestamp))
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3), mkVectorTimestamp("P2"), mkEdgeMetainfo(emitterId, systemTimestamp)
-            )
-            .value.normalize should be (expectedTree.normalize)
-        }
-
-        test( // keep
-          existingEmitterId = "A", emitterId = "B", expectedPayload = payload2,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(
-                node1Id, payload1,
-                Seq(Tree(node2Id, payload2))
-              )
-            )
-          )
-        )
-        test( // move
-          existingEmitterId = "B", emitterId = "A", expectedPayload = payload3,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(node1Id, payload1), Tree(node2Id, payload3)
-            )
-          )
-        )
-      }
-
-      "resolve conflict by comparing non-equal system timestamps when LastWriteWins mapping policy is used (same parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        def test(existingSystemTimestamp: Long, systemTimestamp: Long, expectedPayload: Payload): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(
-              node1Id, node2Id, payload2,
-              mkVectorTimestamp("P1", 2L),
-              mkEdgeMetainfo(systemTimestamp = existingSystemTimestamp)
-            )
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkVectorTimestamp("P2", 2L),
-              mkEdgeMetainfo(systemTimestamp = systemTimestamp)
-            )
-            .value.normalize should be {
-              Tree(
-                treeConfig.rootNodeId, treeConfig.rootPayload,
-                Seq(
-                  Tree(
-                    node1Id, payload1,
-                    Seq(Tree(node2Id, expectedPayload))
-                  )
-                )
-              ).normalize
-            }
-        }
-
-        test(existingSystemTimestamp = 1000L, systemTimestamp = 999L, expectedPayload = payload2) // keep
-        test(existingSystemTimestamp = 999L, systemTimestamp = 1000L, expectedPayload = payload3) // replace
-      }
-
-      "resolve conflict by comparing non-equal system timestamps when LastWriteWins mapping policy is used (different parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        def test(existingSystemTimestamp: Long,
-                 systemTimestamp: Long,
-                 expectedPayload: Payload,
-                 expectedTree: Tree[Payload, Id]): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(
-              node1Id, node2Id, payload2,
-              mkVectorTimestamp("P1", 2L),
-              mkEdgeMetainfo(systemTimestamp = existingSystemTimestamp)
-            )
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkVectorTimestamp("P2", 2L),
-              mkEdgeMetainfo(systemTimestamp = systemTimestamp)
-            )
-            .value.normalize should be (expectedTree.normalize)
-        }
-
-        test( // keep
-          existingSystemTimestamp = 1000L, systemTimestamp = 999L, expectedPayload = payload2,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(
-                node1Id, payload1,
-                Seq(Tree(node2Id, payload2))
-              )
-            )
-          )
-        )
-        test( // move
-          existingSystemTimestamp = 999L, systemTimestamp = 1000L, expectedPayload = payload3,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(node1Id, payload1), Tree(node2Id, payload3)
-            )
-          )
-        )
-      }
-
-      "resolve conflict by comparing emitter ids if system timestamps are equal when LastWriteWins mapping policy is used (same parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        val systemTimestamp = System.currentTimeMillis()
-
-        def test(existingEmitterId: String, emitterId: String, expectedPayload: Payload): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(
-              node1Id, node2Id, payload2,
-              mkVectorTimestamp("P1", 2L),
-              mkEdgeMetainfo(existingEmitterId, systemTimestamp)
-            )
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(node1Id, node2Id, payload3),
-              mkVectorTimestamp("P2", 2L),
-              mkEdgeMetainfo(emitterId, systemTimestamp)
-            )
-            .value.normalize should be {
-              Tree(
-                treeConfig.rootNodeId, treeConfig.rootPayload,
-                Seq(
-                  Tree(
-                    node1Id, payload1,
-                    Seq(Tree(node2Id, expectedPayload))
-                  )
-                )
-              ).normalize
-            }
-        }
-
-        test(existingEmitterId = "A", emitterId = "B", expectedPayload = payload2) // keep
-        test(existingEmitterId = "B", emitterId = "A", expectedPayload = payload3) // replace
-      }
-
-      "resolve conflict by comparing emitter ids if system timestamps are equal when LastWriteWins mapping policy is used (different parent)" in {
-        val (node1Id, payload1) = node(1)
-        val (node2Id, payload2) = node(2)
-        val (_, payload3) = node(3)
-
-        val config: TreeConfig[Payload, Id] =
-          treeConfig.copy(policies = treeConfig.policies.copy(mappingPolicy = MappingPolicy.LastWriteWins()))
-
-        val systemTimestamp = System.currentTimeMillis()
-
-        def test(existingEmitterId: String,
-                 emitterId: String,
-                 expectedPayload: Payload,
-                 expectedTree: Tree[Payload, Id]): Assertion = {
-          treeCRDT(
-            edge(treeConfig.rootNodeId, node1Id, payload1),
-            edge(
-              node1Id, node2Id, payload2,
-              mkVectorTimestamp("P1", 2L),
-              mkEdgeMetainfo(existingEmitterId, systemTimestamp)
-            )
-          )(config)
-            .createChildNode(
-              CreateChildNodeOpPrepared(treeConfig.rootNodeId, node2Id, payload3),
-              mkVectorTimestamp("P2", 2L),
-              mkEdgeMetainfo(emitterId, systemTimestamp)
-            )
-            .value.normalize should be (expectedTree.normalize)
-        }
-
-        test( // keep
-          existingEmitterId = "A", emitterId = "B", expectedPayload = payload2,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(
-                node1Id, payload1,
-                Seq(Tree(node2Id, payload2))
-              )
-            )
-          )
-        )
-        test( // move
-          existingEmitterId = "B", emitterId = "A", expectedPayload = payload3,
-          Tree(
-            treeConfig.rootNodeId, treeConfig.rootPayload,
-            Seq(
-              Tree(node1Id, payload1), Tree(node2Id, payload3)
-            )
-          )
-        )
       }
 
       "resolve conflict if same node is added concurrently under same parent when Custom mapping policy is used" in {
@@ -598,7 +250,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
             edge(treeConfig.rootNodeId, node1Id, payload1),
             edge(node1Id, node2Id, payload2)
           )(config)
-            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo())
+            .createChildNode(CreateChildNodeOpPrepared(node1Id, node2Id, payload3), mkVectorTimestamp())
             .value.normalize should be {
               Tree(
                 treeConfig.rootNodeId, treeConfig.rootPayload,
@@ -625,7 +277,7 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
           treeConfig.copy(policies = treeConfig.policies.copy(connectionPolicy = ConnectionPolicy.Skip))
 
         treeCRDT(edge(treeConfig.rootNodeId, node1Id, payload1))(config)
-          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp(), mkEdgeMetainfo())
+          .createChildNode(CreateChildNodeOpPrepared(node2Id, node3Id, payload3), mkVectorTimestamp())
           .value.normalize should be {
             Tree(treeConfig.rootNodeId, treeConfig.rootPayload, Seq(Tree(node1Id, payload1))).normalize
           }
@@ -717,24 +369,20 @@ class UnorderedTreeSpec extends WordSpec with Matchers {
 
   private def treeCRDT: UnorderedTree[Payload, Id] = UnorderedTree[Payload, Id]
 
-  private def treeCRDT(edges: (Edge[Payload, Id], VectorTime, EdgeMetainfo)*)
+  private def treeCRDT(edges: (Edge[Payload, Id], VectorTime)*)
                       (implicit treeConfig: TreeConfig[Payload, Id]): UnorderedTree[Payload, Id] = {
     val edgesORSet =
       edges.foldLeft(ORSet[Edge[Payload, Id]]) {
-        case (orSet, (edge, vectorTimestamp, _)) => orSet.add(edge, vectorTimestamp)
+        case (orSet, (edge, vectorTimestamp)) => orSet.add(edge, vectorTimestamp)
       }
 
-    val edgesMetainfo =
-      edges.map({ case (edge, vectorTimestamp, metainfo) => (edge.nodeId, Map(vectorTimestamp -> metainfo)) }).toMap
-
-    UnorderedTree[Payload, Id](edgesORSet, edgesMetainfo)
+    UnorderedTree[Payload, Id](edgesORSet)
   }
 
   private def edge(parentId: Id,
                    nodeId: Id,
                    payload: Payload,
-                   vectorTimestamp: VectorTime = mkVectorTimestamp(),
-                   metainfo: EdgeMetainfo = mkEdgeMetainfo()): (Edge[Payload, Id], VectorTime, EdgeMetainfo) =
-    (Edge(nodeId, parentId, payload), vectorTimestamp, metainfo)
+                   vectorTimestamp: VectorTime = mkVectorTimestamp()): (Edge[Payload, Id], VectorTime) =
+    (Edge(nodeId, parentId, payload), vectorTimestamp)
 
 }

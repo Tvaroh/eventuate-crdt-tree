@@ -42,7 +42,7 @@ val testSettings = Seq(
   fork in IntegrationTest := true
 )
 
-val AkkaVersion = "2.4.16"
+val AkkaVersion = "2.4.17"
 val EventuateVersion = "0.9-M1"
 
 lazy val root =
@@ -56,7 +56,7 @@ lazy val root =
         "com.rbmhtechnology" %% "eventuate-core" % EventuateVersion % Test classifier "it",
         "com.rbmhtechnology" %% "eventuate-crdt" % EventuateVersion,
         "com.rbmhtechnology" %% "eventuate-log-leveldb" % EventuateVersion % Test classifier "" classifier "it",
-        "com.typesafe.akka" %% "akka-testkit" % "2.4.16" % Test,
+        "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test,
         "org.scalatest" %% "scalatest" % "3.0.1" % Test
       )
     )

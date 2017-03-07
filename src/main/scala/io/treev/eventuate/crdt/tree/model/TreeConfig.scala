@@ -12,7 +12,7 @@ case class Policies[A, Id](connectionPolicy: ConnectionPolicy,
                            mappingPolicy: MappingPolicy[A, Id])
 object Policies {
   def default[A, Id]: Policies[A, Id] =
-    Policies(ConnectionPolicy.Skip, MappingPolicy.LastWriteWins[A, Id]())
+    Policies(ConnectionPolicy.Skip, MappingPolicy.Zero[A, Id]())
 }
 
 /** Concurrent addition/removal conflict resolution policy. */
@@ -30,9 +30,6 @@ object MappingPolicy {
 
   /** Remove both conflicted nodes. */
   case class Zero[A, Id]() extends MappingPolicy[A, Id]
-
-  /** Use "last write wins" conflict resolution policy. */
-  case class LastWriteWins[A, Id]() extends MappingPolicy[A, Id]
 
   /** Resolve conflict using user-defined `ConflictResolver` typeclass.
     * @tparam A payload type */
