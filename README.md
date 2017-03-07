@@ -12,10 +12,11 @@ Currently, implements unordered tree CRDT that supports the following policies.
 * LastWriteWins - last added record wins (when equal, compares emitter processes ids)
 * Custom - user-defined conflict resolution based on nodes payload and parent nodes ids
 
-### Concurrent addition/removal
+### Concurrent addition / removal
 
 * Skip - drop orphan node
 
-## Status
+## TODO
 
-**Work in progress**
+* Implement ordered tree
+* Cross-compile to Scala `2.11`
